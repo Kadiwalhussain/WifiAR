@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">WifiAR</string>
+    <string name="permission_rationale_title">Location permission required</string>
+    <string name="permission_rationale_body">Android requires location permission to access WiFi signal data. WifiAR uses this only to measure nearby network signal strength (RSSI) for visualization — not to track your location.</string>
+    <string name="permission_grant">Grant permission</string>
+    <string name="permission_open_settings">Open app settings</string>
+    <string name="permission_denied_title">Permission permanently denied</string>
+    <string name="permission_denied_body">WiFi scanning cannot work without location permission. Please enable it in system settings for this app.</string>
+    <string name="scan_now">Scan Now</string>
+    <string name="scanning">Scanning…</string>
+    <string name="cooldown_format">Scan throttled — next scan in %1$ds</string>
+    <string name="no_results">No scan results yet. Tap Scan Now.</string>
+    <string name="wifi_disabled">Wi‑Fi is off. Enable Wi‑Fi to scan.</string>
+    <string name="location_disabled">System location is off. Android requires it to return WiFi scan results.</string>
+    <string name="scan_failed">Scan could not start. Try again shortly.</string>
+
+    <string name="networks_found">%1$d network(s)</string>
+
+    <!-- Navigation -->
+    <string name="tab_map">Map</string>
+    <string name="tab_history">History</string>
+    <string name="tab_account">Account</string>
+    <string name="tab_ar">AR</string>
+    <string name="tab_wifi">WiFi</string>
+    <string name="cancel">Cancel</string>
+
+
+    <!-- AR (Part 2) -->
+    <string name="ar_pose_debug_title">Device pose (m)</string>
+    <string name="ar_reset_origin">Reset Origin</string>
+    <string name="ar_calibration_title">Calibrating AR</string>
+    <string name="ar_calibration_hint">Slowly move your phone to help it understand the space</string>
+    <string name="ar_tracking_lost_generic">Tracking lost — move slowly or point at a textured surface</string>
+    <string name="ar_session_error">AR session error: %1$s</string>
+
+    <!-- Live mapping / fusion (Part 3) -->
+    <string name="session_start">Start Session</string>
+    <string name="session_end">End Session</string>
+    <string name="session_start_title">Start mapping session</string>
+    <string name="session_start_body">Name this area so you can find the walkthrough later. Walk slowly while the app scans Wi‑Fi and tracks pose.</string>
+    <string name="session_location_label">Location name</string>
+    <string name="session_location_hint">Home - Ground Floor</string>
+    <string name="samples_collected">%1$d samples collected in this session</string>
+    <string name="fusion_active">Fusing WiFi + pose</string>
+    <string name="fusion_idle">Start a session to map</string>
+
+    <!-- Heatmap (Part 4) -->
+    <string name="view_raw_points">Raw points</string>
+    <string name="view_heatmap">Heatmap</string>
+    <string name="view_both">Both</string>
+    <string name="heatmap_compute_info">Heatmap · %1$d pts · %2$d ms</string>
+    <string name="heatmap_need_samples">Need %1$d samples for heatmap</string>
+
+    <!-- Dead zones (Part 5) -->
+    <string name="dead_zones_found">%1$d dead zone(s) detected</string>
+    <string name="dead_zone_chip">Zone %1$d · %2$.0f dBm</string>
+    <string name="dead_zone_detail_title">Dead Zone %1$d</string>
+    <string name="dead_zone_detail_worst">Worst RSSI: %1$.1f dBm</string>
+    <string name="dead_zone_detail_avg">Average RSSI: %1$.1f dBm</string>
+    <string name="dead_zone_detail_area">Approx. area: %1$.2f m² (%2$d cells)</string>
+    <string name="dead_zone_detail_location">Location: %1$s</string>
+    <string name="dead_zone_detail_centroid">Centroid xz: (%1$.2f, %2$.2f) m</string>
+
+    <string name="dead_zone_threshold_note">Threshold: ≤ %1$d dBm (AppConfig)</string>
+    <string name="dismiss">Dismiss</string>
+
+    <!-- Session history -->
+    <string name="history_title">Session history</string>
+    <string name="history_empty">No sessions yet. Start a Live Mapping session first.</string>
+    <string name="history_sample_count">%1$d samples</string>
+    <string name="history_in_progress">In progress (not ended)</string>
+    <string name="history_tap_for_dead_zones">Tap for samples &amp; dead-zone analysis</string>
+    <string name="history_dead_zones_header">Dead zones</string>
+    <string name="history_dead_zones_analysing">Analysing coverage…</string>
+    <string name="history_dead_zones_none">No dead zones (nothing ≤ %1$d dBm in a contiguous region).</string>
+    <string name="history_dead_zones_count">%1$d dead zone(s) (threshold ≤ %2$d dBm)</string>
+    <string name="history_samples_header">Raw samples</string>
+
+    <!-- Speed test (Part 6) -->
+    <string name="speed_test_run_here">Run Speed Test Here</string>
+    <string name="speed_test_running">Running speed test…</string>
+    <string name="speed_test_running_short">Testing…</string>
+    <string name="speed_test_running_hint">WiFi scanning continues in the background</string>
+    <string name="speed_test_needs_tracking">AR tracking must be stable to run a speed test</string>
+    <string name="speed_test_detail_title">Speed test checkpoint</string>
+    <string name="speed_test_detail_down">Download: %1$.1f Mbps</string>
+    <string name="speed_test_detail_up">Upload: %1$.1f Mbps</string>
+    <string name="speed_test_detail_ping">Ping: %1$d ms</string>
+    <string name="speed_test_detail_pose">Pose: (%1$.2f, %2$.2f, %3$.2f) m</string>
+
+    <string name="speed_test_detail_backend">Backend: %1$s</string>
+    <string name="speed_test_history_title">↓ %1$.1f / ↑ %2$.1f Mbps</string>
+    <string name="history_speed_tests_header">Speed test checkpoints</string>
+    <string name="history_speed_tests_none">No speed tests in this session.</string>
+    <string name="history_speed_tests_count">%1$d checkpoint(s)</string>
+    <string name="history_synced">Synced to cloud</string>
+    <string name="history_pending_sync">Pending sync</string>
+
+    <!-- Auth / sync (Part 7) -->
+    <string name="auth_login_title">Sign in</string>
+    <string name="auth_register_title">Create account</string>
+    <string name="auth_subtitle">Sync mapping sessions to the WifiAR backend when internet is available.</string>
+    <string name="auth_email">Email</string>
+    <string name="auth_password">Password (min 8)</string>
+    <string name="auth_login">Log in</string>
+    <string name="auth_register">Register</string>
+    <string name="auth_switch_login">Already have an account? Log in</string>
+    <string name="auth_switch_register">Need an account? Register</string>
+    <string name="auth_signed_in_as">Signed in as %1$s</string>
+    <string name="auth_logout">Log out</string>
+    <string name="auth_sync_now">Sync pending sessions now</string>
+    <string name="auth_sync_result">Uploaded %1$d pending session(s)</string>
+
+    <!-- Multi-network comparison (Part 8) -->
+    <string name="network_compare_title">Network comparison</string>
+    <string name="network_compare_open">Compare networks</string>
+    <string name="network_compare_subtitle">%1$d network(s) · Coverage ≥ %2$d dBm · Dead ≤ %3$d dBm</string>
+    <string name="network_compare_empty">Need at least %1$d samples per network for comparison. Walk the room while scanning with multiple APs visible.</string>
+    <string name="network_compare_tap_hint">Tap a network to view its heatmap in AR.</string>
+    <string name="network_compare_samples">%1$d samples</string>
+    <string name="network_ar_title">Network heatmap (AR)</string>
+    <string name="network_select">Select network</string>
+    <string name="network_ar_stats">Avg %1$.0f dBm · Cover %2$.0f%% · Dead %3$.0f%%</string>
+    <string name="best_network_here">Best here: %1$s (%2$.0f dBm)</string>
+</resources>
+
+
+
+
+
+

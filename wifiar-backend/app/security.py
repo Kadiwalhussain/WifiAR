@@ -1,0 +1,43 @@
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import UUID
+
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+
+from app.config import get_settings
+
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+settings = get_settings()
+
+
+def hash_password(password: str) -> str:
+    # bcrypt only uses first 72 bytes
+    return pwd_context.hash(password[:72])
+
+
+def verify_password(plain: str, hashed: str) -> bool:
+    return pwd_context.verify(plain[:72], hashed)
+
+
+def create_access_token(subject: str, extra: dict[str, Any] | None = None) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.access_token_expire_minutes)
+    payload: dict[str, Any] = {"sub": subject, "exp": expire}
+    if extra:
+        payload.update(extra)
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_access_token(token: str) -> dict[str, Any]:
+    return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+
+
+def parse_user_id(token: str) -> UUID:
+    try:
+        payload = decode_access_token(token)
+        sub = payload.get("sub")
+        if not sub:
+            raise ValueError("missing sub")
+        return UUID(str(sub))
+    except (JWTError, ValueError) as exc:
+        raise ValueError("invalid token") from exc

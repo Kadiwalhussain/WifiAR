@@ -1,0 +1,25 @@
+package com.wifiar.app
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Surface
+import androidx.compose.ui.Modifier
+import com.wifiar.app.ui.AppShell
+import com.wifiar.app.ui.theme.WifiARTheme
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        setContent {
+            WifiARTheme {
+                Surface(modifier = Modifier.fillMaxSize()) {
+                    AppShell()
+                }
+            }
+        }
+    }
+}

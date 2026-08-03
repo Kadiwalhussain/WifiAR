@@ -1,0 +1,24 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.ap_
+*.aab
+app/build/
+**/build/
+*.log
+.kotlin/
+.vscode/
+# Backend
+wifiar-backend/.venv/
+wifiar-backend/.env
+**/__pycache__/
+*.pyc
+.Python
+
