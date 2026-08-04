@@ -9,9 +9,6 @@ import java.util.UUID
 
 /**
  * In-memory + Room-backed mapping session lifecycle.
- *
- * Generates a UUID [sessionId] when the user starts a walkthrough and tracks
- * [locationName] / timestamps for history.
  */
 class SessionManager(
     private val sessionDao: MappingSessionDao,
@@ -25,12 +22,6 @@ class SessionManager(
     val currentSessionId: String?
         get() = _activeSession.value?.sessionId
 
-    /**
-     * Start a new mapping session.
-     *
-     * @param locationName user label, e.g. "Home - Ground Floor"
-     * @return the new session, or the existing one if already active
-     */
     suspend fun startSession(locationName: String): MappingSessionEntity {
         _activeSession.value?.let { return it }
 
@@ -46,8 +37,16 @@ class SessionManager(
     }
 
     /**
-     * End the current session (if any) and stamp [endTimeMs].
+     * Re-open a previously ended session (Cloud Anchor resume / multi-day mapping).
      */
+    suspend fun resumeSession(sessionId: String): MappingSessionEntity? {
+        val existing = sessionDao.getById(sessionId) ?: return null
+        sessionDao.reopenSession(sessionId)
+        val resumed = existing.copy(endTimeMs = null)
+        _activeSession.value = resumed
+        return resumed
+    }
+
     suspend fun endSession(): MappingSessionEntity? {
         val current = _activeSession.value ?: return null
         val endTime = System.currentTimeMillis()
@@ -55,5 +54,13 @@ class SessionManager(
         val closed = current.copy(endTimeMs = endTime)
         _activeSession.value = null
         return closed
+    }
+
+    suspend fun attachCloudAnchor(sessionId: String, cloudAnchorId: String) {
+        sessionDao.setCloudAnchorId(sessionId, cloudAnchorId)
+        val cur = _activeSession.value
+        if (cur?.sessionId == sessionId) {
+            _activeSession.value = cur.copy(cloudAnchorId = cloudAnchorId)
+        }
     }
 }

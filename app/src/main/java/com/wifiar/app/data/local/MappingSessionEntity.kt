@@ -16,6 +16,11 @@ data class MappingSessionEntity(
     val synced: Boolean = false,
     /** Server-side UUID returned by POST /sessions (nullable until synced). */
     val remoteSessionId: String? = null,
+    /**
+     * ARCore Cloud Anchor ID for multi-day origin continuity (Part 10).
+     * Null when not hosted or API key unavailable.
+     */
+    val cloudAnchorId: String? = null,
 )
 
 /**
@@ -28,4 +33,5 @@ data class SessionSummary(
     val endTimeMs: Long?,
     val sampleCount: Int,
     val synced: Boolean,
+    val cloudAnchorId: String? = null,
 )

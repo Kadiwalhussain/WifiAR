@@ -57,21 +57,24 @@ import com.google.ar.core.Config
 import com.wifiar.app.AppConfig
 import com.wifiar.app.R
 import com.wifiar.app.ar.ARSessionManager
+import com.wifiar.app.ar.CloudAnchorManager
 import com.wifiar.app.ar.HeatmapMeshBuilder
 import com.wifiar.app.ar.HeatmapPlane
 import com.wifiar.app.ar.TrackingQuality
 import com.wifiar.app.data.DataFusionEngine
 import com.wifiar.app.data.SessionManager
+import com.wifiar.app.data.UserPreferences
 import com.wifiar.app.data.analysis.BestNetworkEstimate
 import com.wifiar.app.data.analysis.DeadZoneDetector
 import com.wifiar.app.data.analysis.DeadZoneRegion
 import com.wifiar.app.data.analysis.NetworkComparisonEngine
 import com.wifiar.app.data.analysis.RecommendationCache
-
 import com.wifiar.app.data.interpolation.HeatmapRecomputeGate
 import com.wifiar.app.data.interpolation.IdwInterpolator
+import com.wifiar.app.data.local.MappingSessionEntity
 import com.wifiar.app.data.local.SpeedTestEntity
 import com.wifiar.app.data.local.WifiArDatabase
+
 import com.wifiar.app.data.speedtest.SpeedTestError
 import com.wifiar.app.data.speedtest.SpeedTestManager
 import com.wifiar.app.data.speedtest.SpeedTestOutcome
@@ -126,15 +129,29 @@ fun LiveMappingScreen(
             scope = scope,
         )
     }
-    val idw = remember { IdwInterpolator() }
-    val heatmapBuilder = remember { HeatmapMeshBuilder() }
-    val deadZoneDetector = remember { DeadZoneDetector() }
+    val idw = remember(UserPreferences.gridCellSizeM) {
+        IdwInterpolator(cellSize = UserPreferences.gridCellSizeM)
+    }
+    val heatmapBuilder = remember(UserPreferences.rssiDeadDbm) {
+        HeatmapMeshBuilder(deadZoneThresholdDbm = UserPreferences.rssiDeadDbm.toFloat())
+    }
+    val deadZoneDetector = remember(UserPreferences.rssiDeadDbm) {
+        DeadZoneDetector(thresholdDbm = UserPreferences.rssiDeadDbm.toFloat())
+    }
     val networkCompareEngine = remember { NetworkComparisonEngine() }
     val recomputeGate = remember { HeatmapRecomputeGate() }
+    val cloudAnchors = remember { CloudAnchorManager(context) }
     val speedTestManager = remember {
         SpeedTestManager(context, db.speedTestDao())
     }
     val syncManager = remember { SyncManager(context) }
+    var arSession by remember { mutableStateOf<com.google.ar.core.Session?>(null) }
+    var resumeCandidates by remember {
+        mutableStateOf<List<MappingSessionEntity>>(emptyList())
+    }
+    var showResumeDialog by remember { mutableStateOf(false) }
+    var cloudStatus by remember { mutableStateOf<String?>(null) }
+
 
 
 
@@ -252,6 +269,53 @@ fun LiveMappingScreen(
         }
     }
 
+    suspend fun beginFreshSession(name: String) {
+        heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
+        heatmapPlane = null
+        deadZones = emptyList()
+        selectedDeadZone = null
+        recomputeGate.reset()
+        cloudStatus = null
+        val session = sessionManager.startSession(name)
+        fusionEngine.start(session.sessionId)
+        wifiScanner.triggerScan()
+    }
+
+    suspend fun beginResumedSession(past: MappingSessionEntity) {
+        heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
+        heatmapPlane = null
+        deadZones = emptyList()
+        recomputeGate.reset()
+        val resumed = sessionManager.resumeSession(past.sessionId)
+        if (resumed == null) {
+            cloudStatus = context.getString(R.string.cloud_resume_failed)
+            beginFreshSession(past.locationName)
+            return
+        }
+        fusionEngine.start(resumed.sessionId)
+        wifiScanner.triggerScan()
+        val cloudId = past.cloudAnchorId
+        val sess = arSession
+        if (!cloudId.isNullOrBlank() && sess != null && cloudAnchors.isApiKeyConfigured()) {
+            cloudStatus = context.getString(R.string.cloud_resolving)
+            when (val r = cloudAnchors.resolve(sess, cloudId)) {
+                is CloudAnchorManager.ResolveResult.Success -> {
+                    arSessionManager.resetOrigin()
+                    cloudStatus = context.getString(R.string.cloud_resume_ok)
+                    runCatching { r.anchor.detach() }
+                }
+                is CloudAnchorManager.ResolveResult.Failure -> {
+                    cloudStatus = context.getString(
+                        R.string.cloud_resume_fallback,
+                        r.reason,
+                    )
+                }
+            }
+        } else {
+            cloudStatus = context.getString(R.string.cloud_resume_local_only)
+        }
+    }
+
     if (showStartDialog) {
         StartSessionDialog(
             locationName = locationName,
@@ -260,16 +324,30 @@ fun LiveMappingScreen(
             onConfirm = {
                 showStartDialog = false
                 scope.launch {
-                    heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
-                    heatmapPlane = null
-                    deadZones = emptyList()
-                    selectedDeadZone = null
-                    recomputeGate.reset()
-                    val session = sessionManager.startSession(locationName)
-                    fusionEngine.start(session.sessionId)
-                    wifiScanner.triggerScan()
+                    resumeCandidates = cloudAnchors.findResumableSessions(locationName)
+                    if (resumeCandidates.isNotEmpty()) {
+                        showResumeDialog = true
+                    } else {
+                        beginFreshSession(locationName)
+                    }
                 }
             },
+        )
+    }
+
+    if (showResumeDialog) {
+        ResumeMappingDialog(
+            candidates = resumeCandidates,
+            cloudReady = cloudAnchors.isApiKeyConfigured(),
+            onResume = { past ->
+                showResumeDialog = false
+                scope.launch { beginResumedSession(past) }
+            },
+            onNewSession = {
+                showResumeDialog = false
+                scope.launch { beginFreshSession(locationName) }
+            },
+            onDismiss = { showResumeDialog = false },
         )
     }
 
@@ -314,20 +392,30 @@ fun LiveMappingScreen(
         },
     )
 
-
     Box(modifier = modifier.fillMaxSize()) {
+
         ARSceneView(
             modifier = Modifier.fillMaxSize(),
             planeRenderer = true,
             planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL,
-            onSessionCreated = { arSessionManager.onSessionCreated(it) },
-            onSessionResumed = { arSessionManager.onSessionResumed(it) },
+            sessionConfiguration = { session, config ->
+                cloudAnchors.applyCloudConfig(session, config)
+            },
+            onSessionCreated = {
+                arSession = it
+                arSessionManager.onSessionCreated(it)
+            },
+            onSessionResumed = {
+                arSession = it
+                arSessionManager.onSessionResumed(it)
+            },
             onSessionPaused = { arSessionManager.onSessionPaused() },
             onSessionFailed = { arSessionManager.onSessionFailed(it) },
             onSessionUpdated = { _, frame -> arSessionManager.onFrame(frame) },
             onTrackingFailureChanged = { arSessionManager.onTrackingFailureChanged(it) },
             onGestureListener = gestureListener,
         ) {
+
             val loader = materialLoader
             val floorY = heatmapPlane?.floorY ?: 0f
 
@@ -576,7 +664,20 @@ fun LiveMappingScreen(
                         .padding(8.dp),
                 )
             }
+            cloudStatus?.let { msg ->
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = msg,
+                    color = Color(0xFFB3E5FC),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0x99000000), RoundedCornerShape(8.dp))
+                        .padding(8.dp),
+                )
+            }
         }
+
 
         AnimatedVisibility(
             visible = !hasAchievedTracking,
@@ -700,9 +801,33 @@ fun LiveMappingScreen(
                     Button(
                         onClick = {
                             scope.launch {
+                                // Try hosting a Cloud Anchor so the space can be resumed later.
+                                val sess = arSession
+                                val active = activeSession
+                                if (sess != null && active != null && cloudAnchors.isApiKeyConfigured()) {
+                                    val local = cloudAnchors.createLocalAnchorAtCamera(sess)
+                                    if (local != null) {
+                                        cloudStatus = context.getString(R.string.cloud_hosting)
+                                        when (val h = cloudAnchors.host(sess, local)) {
+                                            is CloudAnchorManager.HostResult.Success -> {
+                                                sessionManager.attachCloudAnchor(
+                                                    active.sessionId,
+                                                    h.cloudAnchorId,
+                                                )
+                                                cloudStatus = context.getString(R.string.cloud_host_ok)
+                                            }
+                                            is CloudAnchorManager.HostResult.Failure -> {
+                                                cloudStatus = context.getString(
+                                                    R.string.cloud_host_fail,
+                                                    h.reason,
+                                                )
+                                            }
+                                        }
+                                        runCatching { local.detach() }
+                                    }
+                                }
                                 fusionEngine.stop()
                                 val closed = sessionManager.endSession()
-                                // Background bulk upload when network + auth available.
                                 closed?.let { syncManager.enqueueSessionSync(it.sessionId) }
                             }
                         },
@@ -713,6 +838,7 @@ fun LiveMappingScreen(
                     ) {
                         Text(stringResource(R.string.session_end))
                     }
+
 
                     OutlinedButton(
                         onClick = { wifiScanner.triggerScan() },
@@ -1102,10 +1228,64 @@ private fun StartSessionDialog(
     )
 }
 
+@Composable
+private fun ResumeMappingDialog(
+    candidates: List<MappingSessionEntity>,
+    cloudReady: Boolean,
+    onResume: (MappingSessionEntity) -> Unit,
+    onNewSession: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val top = candidates.firstOrNull()
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.cloud_resume_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(stringResource(R.string.cloud_resume_body))
+                if (!cloudReady) {
+                    Text(
+                        stringResource(R.string.cloud_api_missing),
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+                top?.let {
+                    Text(
+                        stringResource(
+                            R.string.cloud_resume_candidate,
+                            it.locationName,
+                            it.cloudAnchorId?.take(12) ?: "—",
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { top?.let(onResume) },
+                enabled = top != null,
+            ) {
+                Text(stringResource(R.string.cloud_resume_yes))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onNewSession) {
+                Text(stringResource(R.string.cloud_resume_no))
+            }
+        },
+    )
+}
+
 private fun rssiTierColor(rssiDbm: Int): Color {
+    val strong = UserPreferences.rssiStrongDbm
+    val medium = UserPreferences.rssiMediumDbm
     return when {
-        rssiDbm >= -50 -> Color(0xFF2E7D32)
-        rssiDbm >= -70 -> Color(0xFFF9A825)
+        rssiDbm >= strong -> Color(0xFF2E7D32)
+        rssiDbm >= medium -> Color(0xFFF9A825)
         else -> Color(0xFF6A1B9A)
     }
 }
+

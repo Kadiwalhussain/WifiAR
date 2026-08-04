@@ -11,7 +11,7 @@ import androidx.room.RoomDatabase
         MappingSessionEntity::class,
         SpeedTestEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = false,
 )
 abstract class WifiArDatabase : RoomDatabase() {
@@ -33,7 +33,6 @@ abstract class WifiArDatabase : RoomDatabase() {
                     WifiArDatabase::class.java,
                     DB_NAME,
                 )
-                    // Part 7 adds synced flags; destructive OK pre-production.
                     .fallbackToDestructiveMigration(dropAllTables = true)
                     .build()
                     .also { instance = it }

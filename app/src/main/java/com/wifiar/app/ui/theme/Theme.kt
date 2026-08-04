@@ -19,9 +19,14 @@ private val LightColors = lightColorScheme(
     primaryContainer = Color(0xFFD0E4FF),
     onPrimaryContainer = WifiBlueDark,
     secondary = SignalGreen,
+    secondaryContainer = Color(0xFFC8E6C9),
+    tertiary = Color(0xFF00838F),
+    tertiaryContainer = Color(0xFFB2EBF2),
     background = Color(0xFFF5F7FA),
     surface = Color.White,
+    surfaceVariant = Color(0xFFE7EEF7),
     onSurface = Color(0xFF1A1C1E),
+    outline = Color(0xFF90A4AE),
     error = SignalRed,
 )
 
@@ -31,11 +36,17 @@ private val DarkColors = darkColorScheme(
     primaryContainer = WifiBlueDark,
     onPrimaryContainer = Color(0xFFD0E4FF),
     secondary = Color(0xFF81C784),
+    secondaryContainer = Color(0xFF1B5E20),
+    tertiary = Color(0xFF4DD0E1),
+    tertiaryContainer = Color(0xFF006064),
     background = Color(0xFF101418),
     surface = Color(0xFF1A1C1E),
+    surfaceVariant = Color(0xFF2A3038),
     onSurface = Color(0xFFE2E2E6),
+    outline = Color(0xFF78909C),
     error = Color(0xFFEF9A9A),
 )
+
 
 val RssiStrong = SignalGreen
 val RssiMedium = SignalAmber

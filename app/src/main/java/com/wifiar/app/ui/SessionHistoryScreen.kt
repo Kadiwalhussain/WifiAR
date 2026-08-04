@@ -42,15 +42,20 @@ import com.wifiar.app.AppConfig
 import com.wifiar.app.R
 import com.wifiar.app.data.analysis.DeadZoneDetector
 import com.wifiar.app.data.analysis.DeadZoneRegion
+import com.wifiar.app.data.export.HeatmapExporter
 import com.wifiar.app.data.interpolation.IdwInterpolator
 import com.wifiar.app.data.local.RssiSampleEntity
 import com.wifiar.app.data.local.SessionSummary
 import com.wifiar.app.data.local.SpeedTestEntity
 import com.wifiar.app.data.local.WifiArDatabase
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.DateFormat
 import java.util.Date
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.material3.OutlinedButton
+
 
 
 /**
@@ -133,12 +138,25 @@ fun SessionHistoryScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Text(
+                        text = stringResource(R.string.history_empty_title),
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
                         text = stringResource(R.string.history_empty),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f),
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = stringResource(R.string.history_empty_hint),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.55f),
+                    )
                 }
             } else {
+
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxSize()
@@ -240,12 +258,18 @@ private fun SessionDetailScreen(
 
 
 
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val exporter = remember { HeatmapExporter(context) }
     val idw = remember { IdwInterpolator() }
     val detector = remember { DeadZoneDetector() }
     var deadZones by remember(summary.sessionId) {
         mutableStateOf<List<DeadZoneRegion>?>(null)
     }
     var analysing by remember(summary.sessionId) { mutableStateOf(false) }
+    var exporting by remember { mutableStateOf(false) }
+    var exportMessage by remember { mutableStateOf<String?>(null) }
+
 
     LaunchedEffect(summary.sessionId, samples) {
         if (samples.isEmpty()) {
@@ -309,7 +333,49 @@ private fun SessionDetailScreen(
                     Text(stringResource(R.string.router_open))
                 }
                 Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        scope.launch {
+                            exporting = true
+                            exportMessage = null
+                            val files = withContext(Dispatchers.IO) {
+                                exporter.exportSession(
+                                    locationName = summary.locationName,
+                                    startTimeMs = summary.startTimeMs,
+                                    samples = samples,
+                                    speedTests = speedTests,
+                                )
+                            }
+                            exporting = false
+                            if (files.pngUri == null && files.csvUri == null) {
+                                exportMessage = context.getString(R.string.export_failed)
+                            } else {
+                                exporter.shareBoth(files.pngUri, files.csvUri)
+                                exportMessage = context.getString(R.string.export_ok)
+                            }
+                        }
+                    },
+                    enabled = samples.isNotEmpty() && !exporting,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (exporting) {
+                            stringResource(R.string.export_working)
+                        } else {
+                            stringResource(R.string.export_share)
+                        },
+                    )
+                }
+                exportMessage?.let {
+                    Text(
+                        text = it,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
+
 
 
             item {

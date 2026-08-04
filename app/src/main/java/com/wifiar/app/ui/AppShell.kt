@@ -16,18 +16,15 @@ import com.wifiar.app.R
 import com.wifiar.app.ui.auth.AuthScreen
 
 enum class AppTab {
-
     LIVE_MAPPING,
     HISTORY,
     ACCOUNT,
+    SETTINGS,
     WIFI_DEBUG,
-    AR_DEBUG,
 }
 
-
 /**
- * App shell: Live Mapping (Part 3 fusion) is primary.
- * History + legacy debug tabs remain for standalone verification.
+ * App shell with Map, History, Account, Settings, and WiFi debug.
  */
 @Composable
 fun AppShell(
@@ -58,24 +55,22 @@ fun AppShell(
                     label = { Text(stringResource(R.string.tab_account)) },
                 )
                 NavigationBarItem(
+                    selected = tab == AppTab.SETTINGS,
+                    onClick = { tab = AppTab.SETTINGS },
+                    icon = { Text("Set") },
+                    label = { Text(stringResource(R.string.tab_settings)) },
+                )
+                NavigationBarItem(
                     selected = tab == AppTab.WIFI_DEBUG,
                     onClick = { tab = AppTab.WIFI_DEBUG },
                     icon = { Text("WiFi") },
                     label = { Text(stringResource(R.string.tab_wifi)) },
-                )
-
-                NavigationBarItem(
-                    selected = tab == AppTab.AR_DEBUG,
-                    onClick = { tab = AppTab.AR_DEBUG },
-                    icon = { Text("AR") },
-                    label = { Text(stringResource(R.string.tab_ar)) },
                 )
             }
         },
     ) { innerPadding ->
         when (tab) {
             AppTab.LIVE_MAPPING -> {
-                // Location for WiFi RSSI + camera for AR (SceneView handles camera).
                 PermissionGate {
                     LiveMappingScreen(
                         modifier = Modifier.padding(
@@ -94,20 +89,17 @@ fun AppShell(
                     modifier = Modifier.padding(innerPadding),
                 )
             }
+            AppTab.SETTINGS -> {
+                SettingsScreen(
+                    modifier = Modifier.padding(innerPadding),
+                )
+            }
             AppTab.WIFI_DEBUG -> {
-
                 PermissionGate {
                     ScannerDebugScreen(
                         modifier = Modifier.padding(innerPadding),
                     )
                 }
-            }
-            AppTab.AR_DEBUG -> {
-                ARScannerScreen(
-                    modifier = Modifier.padding(
-                        bottom = innerPadding.calculateBottomPadding(),
-                    ),
-                )
             }
         }
     }

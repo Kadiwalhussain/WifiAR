@@ -20,7 +20,14 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Override in local.properties: arcore.api.key=YOUR_KEY
+        // or leave placeholder for graceful Cloud Anchor fallback.
+        val arKey = (project.findProperty("arcore.api.key") as String?)
+            ?: "YOUR_ARCORE_API_KEY"
+        manifestPlaceholders["arcoreApiKey"] = arKey
     }
+
 
     buildTypes {
         release {

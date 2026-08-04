@@ -3,9 +3,11 @@ package com.wifiar.app.ar
 import android.graphics.Bitmap
 import android.graphics.Color
 import com.wifiar.app.AppConfig
+import com.wifiar.app.data.UserPreferences
 import com.wifiar.app.data.interpolation.InterpolationGrid
 import com.wifiar.app.data.local.RssiSampleEntity
 import kotlin.math.roundToInt
+
 
 /**
  * Result of turning an [InterpolationGrid] into a single textured floor plane.
@@ -154,18 +156,25 @@ class HeatmapMeshBuilder(
          * Smooth RGB blend across tier boundaries (non-dead cells).
          */
         fun rssiToColorArgb(rssi: Float, alpha: Int = (DEFAULT_ALPHA * 255).roundToInt()): Int {
+            // Prefer user settings when Application has initialized preferences.
+            val strong = runCatching { UserPreferences.rssiStrongDbm.toFloat() }
+                .getOrDefault(RSSI_STRONG)
+            val medium = runCatching { UserPreferences.rssiMediumDbm.toFloat() }
+                .getOrDefault(RSSI_MEDIUM)
+            val weakFloor = medium - 20f
             val (r, g, b) = when {
-                rssi >= RSSI_STRONG -> COLOR_STRONG
-                rssi >= RSSI_MEDIUM -> {
-                    val t = (RSSI_STRONG - rssi) / (RSSI_STRONG - RSSI_MEDIUM)
+                rssi >= strong -> COLOR_STRONG
+                rssi >= medium -> {
+                    val t = (strong - rssi) / (strong - medium).coerceAtLeast(1f)
                     lerpColor(COLOR_STRONG, COLOR_MEDIUM, t.coerceIn(0f, 1f))
                 }
-                rssi >= RSSI_WEAK -> {
-                    val t = (RSSI_MEDIUM - rssi) / (RSSI_MEDIUM - RSSI_WEAK)
+                rssi >= weakFloor -> {
+                    val t = (medium - rssi) / (medium - weakFloor).coerceAtLeast(1f)
                     lerpColor(COLOR_MEDIUM, COLOR_WEAK, t.coerceIn(0f, 1f))
                 }
                 else -> COLOR_WEAK
             }
+
             return Color.argb(
                 alpha.coerceIn(0, 255),
                 (r * 255f).roundToInt().coerceIn(0, 255),

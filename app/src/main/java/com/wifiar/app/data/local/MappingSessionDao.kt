@@ -24,11 +24,29 @@ interface MappingSessionDao {
     @Query(
         """
         UPDATE mapping_sessions
+        SET endTimeMs = NULL
+        WHERE sessionId = :sessionId
+        """,
+    )
+    suspend fun reopenSession(sessionId: String)
+
+    @Query(
+        """
+        UPDATE mapping_sessions
         SET synced = :synced, remoteSessionId = :remoteSessionId
         WHERE sessionId = :sessionId
         """,
     )
     suspend fun markSynced(sessionId: String, remoteSessionId: String, synced: Boolean = true)
+
+    @Query(
+        """
+        UPDATE mapping_sessions
+        SET cloudAnchorId = :cloudAnchorId
+        WHERE sessionId = :sessionId
+        """,
+    )
+    suspend fun setCloudAnchorId(sessionId: String, cloudAnchorId: String)
 
     @Query("SELECT * FROM mapping_sessions WHERE sessionId = :sessionId LIMIT 1")
     suspend fun getById(sessionId: String): MappingSessionEntity?
@@ -44,12 +62,40 @@ interface MappingSessionDao {
 
     @Query(
         """
+        SELECT * FROM mapping_sessions
+        WHERE cloudAnchorId IS NOT NULL AND cloudAnchorId != ''
+        ORDER BY startTimeMs DESC
+        """,
+    )
+    suspend fun getSessionsWithCloudAnchors(): List<MappingSessionEntity>
+
+    /**
+     * Ended sessions that can be reopened for multi-day mapping (Part 10).
+     * Prefer exact location match when [locationName] is non-blank.
+     */
+    @Query(
+        """
+        SELECT * FROM mapping_sessions
+        WHERE endTimeMs IS NOT NULL
+          AND (
+            :locationName = ''
+            OR LOWER(locationName) = LOWER(:locationName)
+          )
+        ORDER BY startTimeMs DESC
+        LIMIT 20
+        """,
+    )
+    suspend fun getResumableSessions(locationName: String): List<MappingSessionEntity>
+
+    @Query(
+        """
         SELECT s.sessionId AS sessionId,
                s.locationName AS locationName,
                s.startTimeMs AS startTimeMs,
                s.endTimeMs AS endTimeMs,
                COUNT(r.id) AS sampleCount,
-               s.synced AS synced
+               s.synced AS synced,
+               s.cloudAnchorId AS cloudAnchorId
         FROM mapping_sessions AS s
         LEFT JOIN rssi_samples AS r ON r.sessionId = s.sessionId
         GROUP BY s.sessionId

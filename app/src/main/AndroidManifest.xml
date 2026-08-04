@@ -2,37 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-
-    <!-- Location is mandatory for WiFi scan results on Android 8+ -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-    <!-- Speed test (Part 6) download/upload against remote endpoints -->
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!--
-      Android 13+ (API 33): NEARBY_WIFI_DEVICES.
-      neverForLocation is intentionally NOT set (i.e. false) because we need
-      RSSI / signal strength, which requires location context on Android.
-    -->
     <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
-
-    <!-- Required for ARCore camera -->
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <uses-feature
-        android:name="android.hardware.wifi"
-        android:required="true" />
-    <uses-feature
-        android:name="android.hardware.camera"
-        android:required="true" />
-    <!-- ARCore-capable device required for this app -->
-    <uses-feature
-        android:name="android.hardware.camera.ar"
-        android:required="true" />
+    <uses-feature android:name="android.hardware.wifi" android:required="true" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
 
     <application
         android:name=".WifiArApp"
@@ -44,24 +25,40 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.WifiAR">
 
-
-        <!-- ARCore required (overrides arsceneview's optional default) -->
         <meta-data
             android:name="com.google.ar.core"
             android:value="required"
             tools:replace="android:value" />
 
+        <!--
+          ARCore Cloud Anchors (Part 10): replace YOUR_ARCORE_API_KEY after enabling
+          the ARCore API in Google Cloud. See README → Cloud Anchors setup.
+        -->
+        <meta-data
+            android:name="com.google.android.ar.API_KEY"
+            android:value="${arcoreApiKey}"
+            tools:replace="android:value" />
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
             android:screenOrientation="fullUser"
-            android:theme="@style/Theme.WifiAR">
+            android:theme="@style/Theme.WifiAR.Splash">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 </manifest>

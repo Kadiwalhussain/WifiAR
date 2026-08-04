@@ -10,6 +10,7 @@
     <string name="scan_now">Scan Now</string>
     <string name="scanning">Scanning…</string>
     <string name="cooldown_format">Scan throttled — next scan in %1$ds</string>
+    <string name="empty_no_networks">No nearby networks. Enable Wi‑Fi and scan in a real environment (not emulator).</string>
     <string name="no_results">No scan results yet. Tap Scan Now.</string>
     <string name="wifi_disabled">Wi‑Fi is off. Enable Wi‑Fi to scan.</string>
     <string name="location_disabled">System location is off. Android requires it to return WiFi scan results.</string>
@@ -21,9 +22,11 @@
     <string name="tab_map">Map</string>
     <string name="tab_history">History</string>
     <string name="tab_account">Account</string>
+    <string name="tab_settings">Settings</string>
     <string name="tab_ar">AR</string>
     <string name="tab_wifi">WiFi</string>
     <string name="cancel">Cancel</string>
+
 
 
     <!-- AR (Part 2) -->
@@ -149,7 +152,60 @@
     <string name="router_ar_label">Suggested router</string>
     <string name="router_ar_hint">Predicted usable coverage ~%1$.0f%% if AP is placed here (heuristic).</string>
     <string name="router_disclaimer">Uses a simplified log-distance path-loss model (no wall/material sensing). Treat results as a heuristic ranking of candidate spots, not a full RF simulation.</string>
+
+    <!-- Part 10: onboarding / settings / export / cloud -->
+    <string name="onboard_skip">Skip</string>
+    <string name="onboard_next">Next</string>
+    <string name="onboard_get_started">Get started</string>
+    <string name="onboard_1_title">Map Wi‑Fi in AR</string>
+    <string name="onboard_1_body">WifiAR walks with you, measures signal strength of nearby networks, and paints a live heatmap over the real room using ARCore.</string>
+    <string name="onboard_2_title">Why location permission?</string>
+    <string name="onboard_2_body">Android requires location permission to access WiFi signal data (RSSI). We use it to measure networks — not to track you. Camera is needed for AR.</string>
+    <string name="onboard_3_title">How to scan well</string>
+    <string name="onboard_3_body">Start a session, walk slowly, and cover every corner. Pause a few seconds so scans can finish (Android throttles WiFi scans). More samples = better heatmaps.</string>
+    <string name="onboard_4_title">Explore insights</string>
+    <string name="onboard_4_body">Find dead zones, compare networks, run speed tests, get a router placement suggestion, export PNG/CSV, and optionally sync to the backend.</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_rssi_section">RSSI color thresholds (dBm)</string>
+    <string name="settings_strong">Strong (green) ≥ %1$d dBm</string>
+    <string name="settings_medium">Medium (yellow) ≥ %1$d dBm</string>
+    <string name="settings_dead">Dead zone ≤ %1$d dBm</string>
+    <string name="settings_path_loss_section">Path-loss preset</string>
+    <string name="settings_path_indoor">Indoor n=%1$.1f</string>
+    <string name="settings_path_open">Open n=%1$.1f</string>
+    <string name="settings_path_note">Simplified model — no wall detection. Used by router placement only.</string>
+    <string name="settings_grid_section">Heatmap grid resolution</string>
+    <string name="settings_grid_cell">Cell size: %1$.2f m</string>
+    <string name="settings_cloud_section">ARCore Cloud Anchors</string>
+    <string name="settings_cloud_body">To resume maps across days, add an ARCore API key (Google Cloud → ARCore API) to local.properties as arcore.api.key=… or the manifest meta-data. See README.</string>
+    <string name="settings_cloud_ack">I understand Cloud Anchors upload feature points to Google</string>
+    <string name="settings_version">WifiAR v%1$s</string>
+
+    <string name="export_share">Export &amp; share (PNG + CSV)</string>
+    <string name="export_working">Exporting…</string>
+    <string name="export_ok">Export ready — pick an app to share</string>
+    <string name="export_failed">Export failed</string>
+
+    <string name="history_empty_title">No sessions yet</string>
+    <string name="history_empty_hint">Open Map, start a session, and walk the room to collect your first heatmap.</string>
+
+    <string name="cloud_resume_title">Resume previous mapping?</string>
+    <string name="cloud_resume_body">A Cloud Anchor from a prior session was found. Resume to keep adding samples to the same physical map (best when standing near where you started last time).</string>
+    <string name="cloud_resume_candidate">Session: %1$s · anchor %2$s…</string>
+    <string name="cloud_resume_yes">Resume previous</string>
+    <string name="cloud_resume_no">Start fresh</string>
+    <string name="cloud_api_missing">No ARCore API key configured — resume will keep samples but may not re-align AR origin. See README.</string>
+    <string name="cloud_resolving">Resolving Cloud Anchor…</string>
+    <string name="cloud_resume_ok">Cloud Anchor resolved — origin rebased</string>
+    <string name="cloud_resume_fallback">Could not resolve Cloud Anchor (%1$s). Continuing with local origin; samples still append to the same session.</string>
+    <string name="cloud_resume_local_only">Resumed session without Cloud Anchor alignment</string>
+    <string name="cloud_resume_failed">Could not reopen session — starting fresh</string>
+    <string name="cloud_hosting">Hosting Cloud Anchor for next time…</string>
+    <string name="cloud_host_ok">Cloud Anchor saved for multi-day resume</string>
+    <string name="cloud_host_fail">Cloud Anchor host failed: %1$s</string>
 </resources>
+
 
 
 
