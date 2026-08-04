@@ -167,20 +167,53 @@
     <string name="onboard_4_body">Find dead zones, compare networks, run speed tests, get a router placement suggestion, export PNG/CSV, and optionally sync to the backend.</string>
 
     <string name="settings_title">Settings</string>
-    <string name="settings_rssi_section">RSSI color thresholds (dBm)</string>
-    <string name="settings_strong">Strong (green) ≥ %1$d dBm</string>
-    <string name="settings_medium">Medium (yellow) ≥ %1$d dBm</string>
-    <string name="settings_dead">Dead zone ≤ %1$d dBm</string>
-    <string name="settings_path_loss_section">Path-loss preset</string>
-    <string name="settings_path_indoor">Indoor n=%1$.1f</string>
-    <string name="settings_path_open">Open n=%1$.1f</string>
-    <string name="settings_path_note">Simplified model — no wall detection. Used by router placement only.</string>
-    <string name="settings_grid_section">Heatmap grid resolution</string>
-    <string name="settings_grid_cell">Cell size: %1$.2f m</string>
-    <string name="settings_cloud_section">ARCore Cloud Anchors</string>
-    <string name="settings_cloud_body">To resume maps across days, add an ARCore API key (Google Cloud → ARCore API) to local.properties as arcore.api.key=… or the manifest meta-data. See README.</string>
-    <string name="settings_cloud_ack">I understand Cloud Anchors upload feature points to Google</string>
+    <string name="settings_subtitle">Tune how WifiAR colors, analyzes, and resumes maps</string>
+    <string name="settings_info">About this setting</string>
+    <string name="settings_got_it">Got it</string>
+    <string name="settings_rssi_section">Signal color thresholds</string>
+    <string name="settings_rssi_section_sub">How RSSI (dBm) maps to green / yellow / purple on heatmaps</string>
+    <string name="settings_strong">Strong · green</string>
+    <string name="settings_strong_value">≥ %1$d dBm</string>
+    <string name="settings_medium">Medium · yellow</string>
+    <string name="settings_medium_value">≥ %1$d dBm</string>
+    <string name="settings_dead">Dead zone · red</string>
+    <string name="settings_dead_value">≤ %1$d dBm</string>
+    <string name="settings_info_rssi_title">RSSI color thresholds</string>
+    <string name="settings_info_rssi_body">RSSI is received signal strength in dBm (higher = better, e.g. −40 is stronger than −80).\n\n• Strong (green): excellent coverage — typically near the router.\n• Medium (yellow): usable but weaker — may drop under load.\n• Dead zone (red): effectively unusable — WifiAR flags these as contiguous weak regions.\n\nThese cutoffs only change colors and dead-zone detection; they do not change how samples are stored.</string>
+    <string name="settings_info_strong_title">Strong (green) threshold</string>
+    <string name="settings_info_strong_body">Samples and heatmap cells with RSSI at or above this value paint green. Raise it if you want only the best coverage shown as “strong.” Lower it to paint more of the room green.</string>
+    <string name="settings_info_medium_title">Medium (yellow) threshold</string>
+    <string name="settings_info_medium_body">Between the strong and medium cutoffs is yellow. Below the medium cutoff is weak (purple). This is also used as the “usable coverage” line in network comparison statistics.</string>
+    <string name="settings_info_dead_title">Dead-zone threshold</string>
+    <string name="settings_info_dead_body">Cells at or below this RSSI are treated as dead zones. WifiAR flood-fills neighboring weak cells and shows red markers. Default −80 dBm is a common “unusable” rule of thumb for indoor Wi‑Fi.</string>
+    <string name="settings_path_loss_section">Path-loss model</string>
+    <string name="settings_path_loss_section_sub">Used only by router placement suggestions</string>
+    <string name="settings_path_indoor">Indoor</string>
+    <string name="settings_path_indoor_detail">n = %1$.1f · walls &amp; clutter</string>
+    <string name="settings_path_open">Open space</string>
+    <string name="settings_path_open_detail">n = %1$.1f · freer propagation</string>
+    <string name="settings_path_note">Simplified model — no wall or material sensing.</string>
+    <string name="settings_info_path_title">Path-loss preset</string>
+    <string name="settings_info_path_body">Router placement estimates how signal would fall off with distance using PL(d) = PL(d0) + 10·n·log10(d/d0).\n\n• Indoor (n≈3): signal drops faster — typical rooms with walls.\n• Open (n≈2): signal travels farther — open plan / outdoors.\n\nThis is a heuristic ranking of candidate spots, not a full RF simulation. Walls are not detected by the phone.</string>
+    <string name="settings_grid_section">Heatmap resolution</string>
+    <string name="settings_grid_section_sub">Size of each interpolated grid cell</string>
+    <string name="settings_grid_cell">Cell size</string>
+    <string name="settings_grid_cell_value">%1$.2f m</string>
+    <string name="settings_grid_fine">Finer</string>
+    <string name="settings_grid_coarse">Coarser</string>
+    <string name="settings_info_grid_title">Grid cell size</string>
+    <string name="settings_info_grid_body">The heatmap divides the mapped area into square cells. Smaller cells look smoother and show finer dead zones, but need more samples and cost a bit more CPU. Larger cells fill faster on short walks.\n\nTypical range: 0.20–0.50 m for rooms.</string>
+    <string name="settings_cloud_section">Cloud Anchors</string>
+    <string name="settings_cloud_section_sub">Multi-day AR origin alignment</string>
+    <string name="settings_cloud_body">To resume maps across days with the same coordinate origin, add an ARCore API key (Google Cloud → ARCore API) to local.properties as arcore.api.key=… See the project README for steps.</string>
+    <string name="settings_cloud_ack">I understand feature points may be uploaded to Google</string>
+    <string name="settings_info_cloud_title">ARCore Cloud Anchors</string>
+    <string name="settings_info_cloud_body">Cloud Anchors let WifiAR remember a physical place so a later mapping session can line up with an earlier one.\n\nWithout an API key you can still reopen sessions and add samples, but the AR origin may not re-align perfectly.\n\nHosting uploads anonymous feature points to Google. Review Google’s ARCore data privacy policy if you enable this in demos or production.</string>
+    <string name="settings_about_section">About</string>
     <string name="settings_version">WifiAR v%1$s</string>
+    <string name="settings_version_sub">Spatial Wi‑Fi survey for Android</string>
+    <string name="settings_reset">Reset to defaults</string>
+    <string name="settings_reset_done">Defaults restored</string>
 
     <string name="export_share">Export &amp; share (PNG + CSV)</string>
     <string name="export_working">Exporting…</string>

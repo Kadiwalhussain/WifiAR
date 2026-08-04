@@ -21,6 +21,12 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Map
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -34,7 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -52,7 +58,7 @@ enum class AppTab {
 }
 
 /**
- * Compact bottom nav shell with icon tabs and animated content.
+ * Compact bottom nav with Material icons and animated tab content.
  */
 @Composable
 fun AppShell(
@@ -74,38 +80,38 @@ fun AppShell(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.94f))
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
                         .border(1.dp, GlassStroke, RoundedCornerShape(18.dp))
                         .padding(horizontal = 2.dp, vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     NavIconItem(
                         selected = tab == AppTab.LIVE_MAPPING,
-                        iconRes = R.drawable.ic_nav_map,
+                        icon = Icons.Outlined.Map,
                         label = stringResource(R.string.tab_map),
                         onClick = { tab = AppTab.LIVE_MAPPING },
                     )
                     NavIconItem(
                         selected = tab == AppTab.HISTORY,
-                        iconRes = R.drawable.ic_nav_history,
+                        icon = Icons.Outlined.History,
                         label = stringResource(R.string.tab_history),
                         onClick = { tab = AppTab.HISTORY },
                     )
                     NavIconItem(
                         selected = tab == AppTab.ACCOUNT,
-                        iconRes = R.drawable.ic_nav_account,
+                        icon = Icons.Outlined.Person,
                         label = stringResource(R.string.tab_account),
                         onClick = { tab = AppTab.ACCOUNT },
                     )
                     NavIconItem(
                         selected = tab == AppTab.SETTINGS,
-                        iconRes = R.drawable.ic_nav_settings,
+                        icon = Icons.Outlined.Settings,
                         label = stringResource(R.string.tab_settings),
                         onClick = { tab = AppTab.SETTINGS },
                     )
                     NavIconItem(
                         selected = tab == AppTab.WIFI_DEBUG,
-                        iconRes = R.drawable.ic_nav_wifi,
+                        icon = Icons.Outlined.Wifi,
                         label = stringResource(R.string.tab_wifi),
                         onClick = { tab = AppTab.WIFI_DEBUG },
                     )
@@ -147,7 +153,7 @@ fun AppShell(
 @Composable
 private fun RowScope.NavIconItem(
     selected: Boolean,
-    iconRes: Int,
+    icon: ImageVector,
     label: String,
     onClick: () -> Unit,
 ) {
@@ -168,7 +174,7 @@ private fun RowScope.NavIconItem(
             contentAlignment = Alignment.Center,
         ) {
             Icon(
-                painter = painterResource(iconRes),
+                imageVector = icon,
                 contentDescription = label,
                 tint = tint,
                 modifier = Modifier.size(20.dp),
