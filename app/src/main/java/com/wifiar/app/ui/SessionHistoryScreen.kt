@@ -139,6 +139,7 @@ fun SessionHistoryScreen(
                         title = stringResource(R.string.history_empty_title),
                         body = stringResource(R.string.history_empty),
                         hint = stringResource(R.string.history_empty_hint),
+                        iconRes = R.drawable.ic_empty_sessions,
                     )
                 }
             } else {

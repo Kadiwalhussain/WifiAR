@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="WifiAR icon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0A1628"/>
+      <stop offset="100%" stop-color="#0D2137"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <!-- AR diamond -->
+  <path d="M64 22 L78 36 L64 50 L50 36 Z" fill="#00E5FF"/>
+  <path d="M64 28 L72 36 L64 44 L56 36 Z" fill="#69F0AE"/>
+  <!-- WiFi arcs -->
+  <path d="M32 62 C48 44 80 44 96 62" fill="none" stroke="#00E5FF" stroke-width="6" stroke-linecap="round" opacity="0.55"/>
+  <path d="M40 72 C50 60 78 60 88 72" fill="none" stroke="#00E5FF" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  <path d="M50 82 C56 74 72 74 78 82" fill="none" stroke="#69F0AE" stroke-width="6" stroke-linecap="round"/>
+  <circle cx="64" cy="96" r="7" fill="#FFFFFF"/>
+</svg>

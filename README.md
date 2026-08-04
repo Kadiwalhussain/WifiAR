@@ -1,6 +1,24 @@
-# WifiAR
+<p align="center">
+  <img src="docs/assets/logo.svg" alt="WifiAR" width="320"/>
+</p>
 
-### Visualize wireless coverage in augmented reality
+<p align="center">
+  <strong>Visualize wireless coverage in augmented reality</strong>
+</p>
+
+<p align="center">
+  <img src="docs/assets/icon.svg" alt="WifiAR icon" width="72"/>
+</p>
+
+<p align="center">
+  <a href="docs/SETUP.md"><img alt="Setup" src="https://img.shields.io/badge/docs-setup-00E5FF?style=flat-square"/></a>
+  <a href="docs/ARCHITECTURE.md"><img alt="Architecture" src="https://img.shields.io/badge/docs-architecture-69F0AE?style=flat-square"/></a>
+  <a href="docs/API.md"><img alt="API" src="https://img.shields.io/badge/docs-API-E040FB?style=flat-square"/></a>
+  <a href="docs/USER_GUIDE.md"><img alt="User guide" src="https://img.shields.io/badge/docs-user%20guide-90CAF9?style=flat-square"/></a>
+  <img alt="Platform" src="https://img.shields.io/badge/platform-Android-3DDC84?style=flat-square&logo=android&logoColor=white"/>
+  <img alt="ARCore" src="https://img.shields.io/badge/AR-ARCore-4285F4?style=flat-square&logo=google&logoColor=white"/>
+  <img alt="Kotlin" src="https://img.shields.io/badge/Kotlin-7F52FF?style=flat-square&logo=kotlin&logoColor=white"/>
+</p>
 
 WifiAR turns an Android phone into a **spatial Wi‑Fi survey tool**. Walk a room once and the app fuses live RSSI with ARCore pose tracking to paint a heatmap over the real floor, flag dead zones, compare nearby networks, measure throughput, and recommend where a router might perform better.
 
@@ -26,10 +44,24 @@ Built for people who care about coverage — homeowners, field techs, network st
 
 ---
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Setup](docs/SETUP.md) | Clone, run, backend, secrets |
+| [User guide](docs/USER_GUIDE.md) | How to map rooms and read the UI |
+| [Architecture](docs/ARCHITECTURE.md) | Packages, data flow, performance |
+| [API](docs/API.md) | Backend endpoints |
+| [Icons](docs/ICONS.md) | Launcher, nav, and brand assets |
+| [Contributing](docs/CONTRIBUTING.md) | PR workflow and checklist |
+| [Changelog](docs/CHANGELOG.md) | Release history |
+| [Screenshots](docs/screenshots/README.md) | Where to place demo captures |
+
+---
+
 ## Screenshots
 
-> *Add device captures here for your repo / report:*  
-> `docs/screenshots/map.png` · `docs/screenshots/heatmap.png` · `docs/screenshots/history.png`
+> Add device captures under [`docs/screenshots/`](docs/screenshots/README.md), then link them here.
 
 ---
 
@@ -74,7 +106,6 @@ Built for people who care about coverage — homeowners, field techs, network st
 - ARCore · SceneView (Filament)  
 - Room · Coroutines · WorkManager  
 - Retrofit · OkHttp · Moshi  
-- EncryptedSharedPreferences (auth tokens)
 
 **Backend** (`wifiar-backend/`)
 
@@ -82,45 +113,22 @@ Built for people who care about coverage — homeowners, field techs, network st
 
 ---
 
-## Repository layout
-
-```
-WifiAR/
-├── app/                    Android application
-│   └── src/main/java/com/wifiar/app/
-│       ├── scanner/        Wi‑Fi acquisition
-│       ├── ar/             Pose, heatmap mesh, Cloud Anchors
-│       ├── data/           Fusion, Room, analysis, export, sync
-│       └── ui/             Screens, theme, shared components
-└── wifiar-backend/         Optional API + spatial database
-```
-
----
-
-## Getting started
-
-### Requirements
-
-- Android Studio (JDK 17)  
-- Physical device with **ARCore** support, API **26+**  
-- USB debugging enabled  
-
-> Emulators are a poor fit: reliable Wi‑Fi RSSI and ARCore tracking need real hardware.
-
-### Run the app
+## Quick start
 
 ```bash
 git clone https://github.com/Kadiwalhussain/WifiAR.git
 cd WifiAR
 ```
 
-1. Open the project in Android Studio and wait for Gradle sync.  
-2. Connect a physical device.  
+1. Open in Android Studio (JDK 17) and sync Gradle.  
+2. Connect a physical **ARCore** device (API 26+).  
 3. Run the **app** configuration.  
-4. Complete onboarding and grant **location**, **camera**, and (Android 13+) **nearby Wi‑Fi**.  
-5. Open **Map → Start Session**, walk slowly, and cover corners of the space.
+4. Grant location + camera (+ nearby Wi‑Fi on Android 13+).  
+5. **Map → Start Session** → walk slowly and cover corners.
 
-### Optional: backend
+Full instructions: **[docs/SETUP.md](docs/SETUP.md)**
+
+### Optional backend
 
 ```bash
 cd wifiar-backend
@@ -130,95 +138,48 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- Health: `http://localhost:8000/health`  
-- Docs: `http://localhost:8000/docs`  
+Set `AppConfig.API_BASE_URL` to your LAN IP (or `http://10.0.2.2:8000/` for the emulator).
 
-Point the app at your machine by setting `AppConfig.API_BASE_URL`:
-
-| Target | Example |
-|--------|---------|
-| Emulator → host | `http://10.0.2.2:8000/` |
-| Phone on LAN | `http://192.168.x.x:8000/` |
-
-Register or sign in under **Account** to enable background session sync.
-
-### Optional: ARCore Cloud Anchors
-
-For multi-visit origin alignment in the same physical room:
-
-1. Create a Google Cloud project and enable the **ARCore API**.  
-2. Create an API key (restrict to your package / SHA-1 if you prefer).  
-3. Add to `local.properties` (never commit secrets):
+### Optional Cloud Anchors
 
 ```properties
+# local.properties
 arcore.api.key=YOUR_KEY
 ```
 
-4. Rebuild. Ending a session may host an anchor; starting again with the same location name offers **Resume previous**.
-
-Without a key, mapping and local resume still work — only cloud origin re-alignment is unavailable.
-
-Hosting Cloud Anchors uploads feature points to Google; see [ARCore data privacy](https://developers.google.com/ar/data-privacy).
+Enable the **ARCore API** in Google Cloud. See [SETUP.md](docs/SETUP.md).
 
 ---
 
-## Using the app
+## Repository layout
 
-1. **Map** — start a named session, walk the space, switch Points / Heatmap / Both.  
-2. **Speed test** — pin throughput at the current pose.  
-3. **History** — open a session for dead zones, network comparison, router suggestion, export.  
-4. **Settings** — adjust RSSI color cutoffs, grid cell size, and path-loss preset.  
-5. **Account** — sign in to sync pending sessions when online.
-
-**Tips for a good map**
-
-- Move slowly and pause at corners so scans can complete.  
-- Cover the full footprint; sparse walks produce patchy heatmaps.  
-- Prefer well-lit, textured surfaces for stable AR tracking.  
-
----
-
-## Design & performance
-
-WifiAR is tuned for **smooth AR** and a compact HUD:
-
-- Spatial downsampling of sample spheres (budgeted draw count)  
-- Small markers so the room stays readable  
-- Heatmap recompute only after meaningful new sample volume  
-- Heavy analysis off the main thread  
-- Time-bounded Cloud Anchor host / resolve so session end never stalls  
+```
+WifiAR/
+├── app/                 Android client
+├── wifiar-backend/      Optional API + PostGIS
+├── docs/                Guides, icons notes, assets
+│   ├── assets/          logo.svg · icon.svg
+│   └── screenshots/     place demo images here
+└── README.md
+```
 
 ---
 
 ## Limitations
 
-Be explicit about what the product does *not* claim:
-
 | Topic | Reality |
 |-------|---------|
 | Platform | Android only — iOS does not expose equivalent free-form Wi‑Fi RSSI APIs |
 | Scan rate | Android throttles scans; dense maps need a deliberate walk |
-| Path-loss model | Single exponent, no wall or material sensing — placement is a **heuristic** |
+| Path-loss model | Single exponent, no wall sensing — placement is a **heuristic** |
 | Coordinates | AR-local frame, not GPS or CAD floor plans |
 | Cloud Anchors | Requires a Google API key and network connectivity |
 
 ---
 
-## Configuration
-
-Key knobs live in `AppConfig` and **Settings**:
-
-- Dead-zone threshold (default ≤ −80 dBm)  
-- Coverage / color tiers for heatmaps  
-- Grid cell size for IDW  
-- Path-loss exponent presets (indoor vs open)  
-- API base URL and speed-test backend selection  
-
----
-
 ## Contributing
 
-Issues and pull requests are welcome. Prefer small, focused changes with a clear description of behavior and device impact (ARCore behavior varies by hardware).
+See [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md). Issues and focused pull requests are welcome.
 
 ---
 

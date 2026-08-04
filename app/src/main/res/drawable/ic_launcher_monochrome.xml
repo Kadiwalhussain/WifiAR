@@ -4,49 +4,28 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!--
-      Safe zone for adaptive icons is roughly 66dp centered (21..87).
-      WiFi arcs + AR diamond mark for WifiAR brand.
-    -->
-
-    <!-- Outer signal arc -->
     <path
         android:fillColor="#00000000"
         android:pathData="M30,52 C40,40 68,40 78,52"
         android:strokeWidth="4.5"
-        android:strokeColor="#00E5FF"
-        android:strokeLineCap="round"
-        android:strokeAlpha="0.55" />
-
-    <!-- Mid signal arc -->
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round" />
     <path
         android:fillColor="#00000000"
         android:pathData="M36,58 C44,49 64,49 72,58"
         android:strokeWidth="4.5"
-        android:strokeColor="#00E5FF"
-        android:strokeLineCap="round"
-        android:strokeAlpha="0.8" />
-
-    <!-- Inner signal arc -->
+        android:strokeColor="#FFFFFF"
+        android:strokeLineCap="round" />
     <path
         android:fillColor="#00000000"
         android:pathData="M42,64 C47,58 61,58 66,64"
         android:strokeWidth="4.5"
-        android:strokeColor="#69F0AE"
+        android:strokeColor="#FFFFFF"
         android:strokeLineCap="round" />
-
-    <!-- Core node -->
     <path
         android:fillColor="#FFFFFF"
         android:pathData="M54,72 m-5,0 a5,5 0 1,1 10,0 a5,5 0 1,1 -10,0" />
-
-    <!-- AR diamond accent (spatial / AR) -->
     <path
-        android:fillColor="#00E5FF"
-        android:fillAlpha="0.95"
+        android:fillColor="#FFFFFF"
         android:pathData="M54,28 L62,36 L54,44 L46,36 Z" />
-    <path
-        android:fillColor="#69F0AE"
-        android:fillAlpha="0.9"
-        android:pathData="M54,32 L58,36 L54,40 L50,36 Z" />
 </vector>

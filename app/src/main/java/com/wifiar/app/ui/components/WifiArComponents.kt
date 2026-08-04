@@ -241,6 +241,7 @@ fun EmptyStateView(
     body: String,
     hint: String? = null,
     modifier: Modifier = Modifier,
+    iconRes: Int? = null,
 ) {
     AnimatedVisibility(
         visible = true,
@@ -255,7 +256,7 @@ fun EmptyStateView(
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(72.dp)
                     .background(
                         brush = Brush.radialGradient(
                             listOf(NeonCyan.copy(alpha = 0.35f), Color.Transparent),
@@ -265,7 +266,16 @@ fun EmptyStateView(
                     .border(1.dp, NeonCyan.copy(alpha = 0.4f), CircleShape),
                 contentAlignment = Alignment.Center,
             ) {
-                Text("◉", color = NeonCyan, style = MaterialTheme.typography.headlineMedium)
+                if (iconRes != null) {
+                    androidx.compose.material3.Icon(
+                        painter = androidx.compose.ui.res.painterResource(iconRes),
+                        contentDescription = null,
+                        tint = NeonCyan,
+                        modifier = Modifier.size(32.dp),
+                    )
+                } else {
+                    Text("◉", color = NeonCyan, style = MaterialTheme.typography.headlineMedium)
+                }
             }
             Spacer(modifier = Modifier.height(16.dp))
             Text(

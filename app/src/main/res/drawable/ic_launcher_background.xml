@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Deep navy base -->
+    <path
+        android:fillColor="#0A1628"
+        android:pathData="M0,0h108v108h-108z" />
+    <!-- Soft cyan glow top-left -->
+    <path
+        android:fillColor="#0D3A48"
+        android:pathData="M0,0C36,8 54,28 54,54C54,28 72,8 108,0L108,0L0,0Z"
+        android:fillAlpha="0.9" />
+    <!-- Soft teal corner -->
+    <path
+        android:fillColor="#0A2F3A"
+        android:pathData="M108,108C78,98 60,78 54,54C48,78 30,98 0,108L108,108Z"
+        android:fillAlpha="0.85" />
+</vector>
