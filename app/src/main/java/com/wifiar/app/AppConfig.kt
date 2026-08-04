@@ -83,7 +83,45 @@ object AppConfig {
 
     /** Minimum samples required for a network to appear in comparison. */
     const val NETWORK_COMPARE_MIN_SAMPLES: Int = 3
+
+    // ── Router placement (Part 9) ────────────────────────────────────────────
+
+    /**
+     * Log-distance path-loss exponent (n).
+     * ~2.0 open space, ~3.0 typical indoor with walls (default).
+     * This is a simplified model — no wall/material sensing.
+     */
+    const val PATH_LOSS_EXPONENT_INDOOR: Float = 3.0f
+    const val PATH_LOSS_EXPONENT_OPEN: Float = 2.0f
+
+    /** Reference distance d0 (metres) for path-loss model. */
+    const val PATH_LOSS_D0_M: Float = 1.0f
+
+    /**
+     * Free-space path loss at d0 for ~2.4 GHz (~40 dB at 1 m).
+     * Used with typical AP TX power (~20 dBm) → ~−20 dBm RSSI at 1 m.
+     */
+    const val PATH_LOSS_PL_D0_DB: Float = 40.0f
+
+    /** Assumed AP transmit power (dBm). */
+    const val ROUTER_TX_POWER_DBM: Float = 20.0f
+
+    /** Candidate router grid spacing (metres). */
+    const val ROUTER_CANDIDATE_SPACING_M: Float = 0.5f
+
+    /** Target evaluation grid spacing (metres). */
+    const val ROUTER_TARGET_SPACING_M: Float = 0.4f
+
+    /** Dead-zone penalty weight in placement score. */
+    const val ROUTER_DEAD_ZONE_PENALTY: Float = 1.0f
+
+    /** Minimum fused samples before recommending placement. */
+    const val ROUTER_RECOMMEND_MIN_SAMPLES: Int = 15
+
+    /** AR marker radius for recommended router spot. */
+    const val ROUTER_MARKER_RADIUS_M: Float = 0.18f
 }
+
 
 
 

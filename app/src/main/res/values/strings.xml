@@ -123,7 +123,34 @@
     <string name="network_select">Select network</string>
     <string name="network_ar_stats">Avg %1$.0f dBm · Cover %2$.0f%% · Dead %3$.0f%%</string>
     <string name="best_network_here">Best here: %1$s (%2$.0f dBm)</string>
+
+    <!-- Router placement (Part 9) -->
+    <string name="router_title">Router placement</string>
+    <string name="router_open">Suggest router placement</string>
+    <string name="router_suggest">Suggest Optimal Router Placement</string>
+    <string name="router_sample_count">Session samples: %1$d</string>
+    <string name="router_need_samples">Need at least %1$d samples (have %2$d). Walk more of the room while mapping.</string>
+    <string name="router_computing">Evaluating candidate positions…</string>
+    <string name="router_no_candidates">No placement candidates found for this session footprint.</string>
+    <string name="router_compute_info">Computed in %1$d ms · path-loss n = %2$.1f</string>
+    <string name="router_comparison_title">Current setup vs recommended</string>
+    <string name="router_current">Current (measured)</string>
+    <string name="router_recommended">If moved to #1</string>
+    <string name="router_stat_cover">Coverage: %1$.0f%%</string>
+    <string name="router_stat_dead">Dead zone: %1$.0f%%</string>
+    <string name="router_improvement_up">Predicted coverage gain: +%1$.0f percentage points</string>
+    <string name="router_improvement_down">Predicted coverage change: %1$.0f percentage points</string>
+    <string name="router_top_title">Top recommended positions</string>
+    <string name="router_rank">#%1$d recommendation</string>
+    <string name="router_pose">xyz (%1$.2f, %2$.2f, %3$.2f) m</string>
+    <string name="router_candidate_stats">Cover %1$.0f%% · Dead %2$.0f%% · Avg RSSI %3$.0f dBm · score %4$.2f</string>
+    <string name="router_show_ar">Show #1 spot in AR</string>
+    <string name="router_ar_title">Walk to the golden marker</string>
+    <string name="router_ar_label">Suggested router</string>
+    <string name="router_ar_hint">Predicted usable coverage ~%1$.0f%% if AP is placed here (heuristic).</string>
+    <string name="router_disclaimer">Uses a simplified log-distance path-loss model (no wall/material sensing). Treat results as a heuristic ranking of candidate spots, not a full RF simulation.</string>
 </resources>
+
 
 
 

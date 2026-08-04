@@ -66,6 +66,8 @@ import com.wifiar.app.data.analysis.BestNetworkEstimate
 import com.wifiar.app.data.analysis.DeadZoneDetector
 import com.wifiar.app.data.analysis.DeadZoneRegion
 import com.wifiar.app.data.analysis.NetworkComparisonEngine
+import com.wifiar.app.data.analysis.RecommendationCache
+
 import com.wifiar.app.data.interpolation.HeatmapRecomputeGate
 import com.wifiar.app.data.interpolation.IdwInterpolator
 import com.wifiar.app.data.local.SpeedTestEntity
@@ -420,8 +422,56 @@ fun LiveMappingScreen(
                 }
             }
 
+            // #1 recommended router placement (from Part 9 recommender cache).
+            RecommendationCache.topPosition?.let { rec ->
+                key("router-rec-live") {
+                    val glow = remember(loader) {
+                        runCatching {
+                            loader.createUnlitColorInstance(Color(0xFFFFD54F))
+                        }.getOrElse {
+                            loader.createColorInstance(
+                                color = Color(0xFFFFD54F),
+                                metallic = 0.2f,
+                                roughness = 0.3f,
+                            )
+                        }
+                    }
+                    val core = remember(loader) {
+                        runCatching {
+                            loader.createUnlitColorInstance(Color(0xFFFF6F00))
+                        }.getOrElse {
+                            loader.createColorInstance(
+                                color = Color(0xFFFF6F00),
+                                metallic = 0.1f,
+                                roughness = 0.4f,
+                            )
+                        }
+                    }
+                    SphereNode(
+                        radius = AppConfig.ROUTER_MARKER_RADIUS_M * 1.3f,
+                        position = Position(x = rec.x, y = rec.y, z = rec.z),
+                        materialInstance = glow,
+                    )
+                    SphereNode(
+                        radius = AppConfig.ROUTER_MARKER_RADIUS_M,
+                        position = Position(x = rec.x, y = rec.y, z = rec.z),
+                        materialInstance = core,
+                    )
+                    TextNode(
+                        text = stringResource(R.string.router_ar_label),
+                        fontSize = 32f,
+                        textColor = android.graphics.Color.BLACK,
+                        backgroundColor = 0xCCFFD54F.toInt(),
+                        widthMeters = 0.65f,
+                        heightMeters = 0.26f,
+                        position = Position(x = rec.x, y = rec.y + 0.35f, z = rec.z),
+                    )
+                }
+            }
+
             // Speed-test checkpoints — cyan markers (distinct from red dead zones).
             speedTests.forEach { test ->
+
                 key("st-${test.id}") {
                     val markerY = test.poseY
                     val nodeName = "$SPEED_TEST_NODE_PREFIX${test.id}"

@@ -80,24 +80,38 @@ fun SessionHistoryScreen(
             .collectAsStateWithLifecycle(initialValue = emptyList())
 
         var showNetworkCompare by remember(selectedSessionId) { mutableStateOf(false) }
+        var showRouterPlacement by remember(selectedSessionId) { mutableStateOf(false) }
 
-        if (showNetworkCompare) {
-            NetworkComparisonScreen(
-                sessionId = selectedSessionId!!,
-                sessionLabel = selectedSummary.locationName,
-                onBack = { showNetworkCompare = false },
-                modifier = modifier,
-            )
-        } else {
-            SessionDetailScreen(
-                summary = selectedSummary,
-                samples = samples,
-                speedTests = speedTests,
-                onBack = { selectedSessionId = null },
-                onCompareNetworks = { showNetworkCompare = true },
-                modifier = modifier,
-            )
+        when {
+            showRouterPlacement -> {
+                RouterPlacementScreen(
+                    sessionId = selectedSessionId!!,
+                    sessionLabel = selectedSummary.locationName,
+                    onBack = { showRouterPlacement = false },
+                    modifier = modifier,
+                )
+            }
+            showNetworkCompare -> {
+                NetworkComparisonScreen(
+                    sessionId = selectedSessionId!!,
+                    sessionLabel = selectedSummary.locationName,
+                    onBack = { showNetworkCompare = false },
+                    modifier = modifier,
+                )
+            }
+            else -> {
+                SessionDetailScreen(
+                    summary = selectedSummary,
+                    samples = samples,
+                    speedTests = speedTests,
+                    onBack = { selectedSessionId = null },
+                    onCompareNetworks = { showNetworkCompare = true },
+                    onRouterPlacement = { showRouterPlacement = true },
+                    modifier = modifier,
+                )
+            }
         }
+
     } else {
 
 
@@ -220,8 +234,10 @@ private fun SessionDetailScreen(
     speedTests: List<SpeedTestEntity>,
     onBack: () -> Unit,
     onCompareNetworks: () -> Unit = {},
+    onRouterPlacement: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
+
 
 
     val idw = remember { IdwInterpolator() }
@@ -285,7 +301,16 @@ private fun SessionDetailScreen(
                     Text(stringResource(R.string.network_compare_open))
                 }
                 Spacer(modifier = Modifier.height(8.dp))
+                Button(
+                    onClick = onRouterPlacement,
+                    enabled = samples.isNotEmpty(),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.router_open))
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
+
 
             item {
                 Text(
