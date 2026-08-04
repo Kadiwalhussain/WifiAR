@@ -1,157 +1,185 @@
 # WifiAR
 
-Android app that visualizes **Wi‑Fi signal strength in AR**, detects dead zones, compares networks, runs speed tests, suggests router placement, and optionally syncs sessions to a FastAPI + PostGIS backend.
+**See Wi‑Fi the way it feels in the room.**  
+WifiAR is an Android AR app that paints live signal heatmaps over real space, finds dead zones, compares networks, runs speed tests, suggests better router placement, and exports shareable maps.
 
-**Status:** Parts 1–10 complete (student project end-to-end).
+> Built as a full end-to-end student project (Parts 1–10) — polished for demos, fast on device, honest about RF limits.
 
 ---
 
-## Architecture overview
+## Why it feels futuristic
+
+| Experience | What you get |
+|------------|----------------|
+| **AR HUD** | Compact glass panels, neon signal palette, pulse tracking status |
+| **Live spheres** | Tiny colored RSSI balls in 3D (spatially downsampled so AR stays smooth) |
+| **Heatmap plane** | IDW floor texture — green / amber / magenta / dead-zone red |
+| **Motion UI** | Tab transitions, segmented view mode, spring buttons, onboarding pager |
+| **Stability** | Session start/end hardened, Cloud Anchor timeouts, recycled-bitmap guards |
+
+---
+
+## How the app works (pipeline)
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│ Android (Kotlin + Jetpack Compose + ARCore / SceneView)     │
-│  scanner/     WifiScanner — all visible APs + RSSI           │
-│  ar/          Pose, Cloud Anchors, heatmap mesh              │
-│  data/        Fusion, IDW, dead zones, comparison, path-loss │
-│               Room DB, export, sync (Retrofit + WorkManager) │
-│  ui/          Map · History · Account · Settings · Onboarding│
-└────────────────────────────┬────────────────────────────────┘
-                             │ JWT bulk upload
-                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│ wifiar-backend (FastAPI + PostgreSQL/PostGIS)                 │
-│  Auth · sessions · bulk RSSI/speed points · GP heatmap       │
-└─────────────────────────────────────────────────────────────┘
+Camera + ARCore pose ──┐
+                       ├──► DataFusionEngine ──► Room DB (samples / sessions / speeds)
+Wi‑Fi scan (all APs) ──┘              │
+                                      ▼
+                         IDW grid → Heatmap mesh → Dead zones
+                                      │
+                    ┌─────────────────┼─────────────────┐
+                    ▼                 ▼                 ▼
+            Network compare    Path-loss router    PNG/CSV export
+                    │           placement            ShareSheet
+                    ▼                 ▼
+              Best network here   Golden AR marker
+                    │
+                    └── optional ──► FastAPI + PostGIS (JWT sync)
 ```
 
-| Area | Implementation |
-|------|----------------|
-| Wi‑Fi scans | `WifiManager` + throttle-aware Flow (all BSSIDs) |
-| Pose | ARCore via SceneView `ARSceneView` |
-| Heatmap | Client IDW; server Gaussian Process |
-| Dead zones | Flood-fill on IDW grid ≤ threshold |
-| Speed test | HTTP throughput (Cloudflare) or Ookla stub |
-| Multi-network | Per-BSSID IDW + Best Network Here |
-| Router tip | Log-distance path loss grid search |
-| Sync | Retrofit + WorkManager when session ends |
-| Continuity | ARCore Cloud Anchors (optional API key) |
+### Layer by layer
+
+1. **Scan** — `WifiScanner` reads *every* nearby AP (not only the connected one). Android scan throttle is respected (~30s cooldown).
+2. **Pose** — ARCore via SceneView tracks device position in local metric space.
+3. **Fusion** — Each scan batch is tagged with the nearest recent pose and stored in Room.
+4. **Heatmap** — Inverse Distance Weighting (IDW) on the floor plane `(x, z)`; recompute is gated so UI never blocks on huge grids.
+5. **Dead zones** — Flood-fill cells ≤ threshold (default −80 dBm).
+6. **Speed tests** — HTTP throughput (Cloudflare-style) or Ookla stub; cyan AR checkpoints.
+7. **Multi-network** — Per-BSSID stats + “Best network here” while you walk.
+8. **Router placement** — Log-distance path loss grid search (heuristic; **no wall detection**).
+9. **Cloud** — Optional FastAPI + PostGIS + WorkManager sync.
+10. **Continuity** — Optional ARCore Cloud Anchors to re-align origin across days; resume still works locally without an API key.
 
 ---
 
-## Known limitations (be honest in demos)
+## Architecture (code map)
 
-1. **iOS / non-Android** — apps cannot freely read Wi‑Fi RSSI the same way; this project is Android-only by design.
-2. **Scan throttling** — Android 9+ limits scan rate (~4 / 2 min). Client enforces a 30s cooldown.
-3. **Path-loss model** — single exponent `n`, **no wall/material sensing**. Placement tips are heuristics, not RF simulation.
-4. **Cloud Anchors** — require Google Cloud ARCore API key; without it, resume still reopens session data but may not re-align AR origin.
-5. **Emulators** — Wi‑Fi scan + ARCore are unreliable; use a **physical ARCore device**.
-6. **Coordinate frames** — poses are local to the AR session origin (not GPS / floor plans).
+```
+app/src/main/java/com/wifiar/app/
+├── scanner/          Wi‑Fi RSSI acquisition
+├── ar/               Pose, HeatmapMeshBuilder, CloudAnchorManager
+├── data/
+│   ├── fusion + SessionManager (crash-safe lifecycle)
+│   ├── local/        Room entities & DAOs
+│   ├── interpolation/ IDW + recompute gate
+│   ├── analysis/     Dead zones, compare, path-loss, router
+│   ├── speedtest/    Throughput / Ookla
+│   ├── sync/         Retrofit + WorkManager + JWT
+│   ├── export/       PNG heatmap + CSV + ShareSheet
+│   └── UserPreferences  Settings (thresholds, grid, path-loss)
+├── ui/
+│   ├── components/   Glass HUD, pills, segmented control, empty states
+│   ├── theme/        Compact typography + neon dark/light schemes
+│   └── screens       Map · History · Account · Settings · Onboarding
+└── AppConfig         Tunable radii, timeouts, API base URL
+```
 
----
-
-## Prerequisites
-
-- Android Studio (JDK 17), physical device API 26+ with ARCore
-- Optional backend: Docker, Python 3.10+
-
----
-
-## Android setup
-
-1. Open this repo in Android Studio; Gradle sync.
-2. Connect a physical device with USB debugging.
-3. **Optional Cloud Anchors** (multi-day AR origin alignment — see below).
-4. **Optional backend URL:** set `AppConfig.API_BASE_URL` in
-   `app/src/main/java/com/wifiar/app/AppConfig.kt`  
-   - Emulator → host: `http://10.0.2.2:8000/`  
-   - Device on LAN: `http://<your-pc-ip>:8000/`
-5. Run the `app` configuration.
-
-First launch shows a short **onboarding** tutorial, then Map / History / Account / Settings.
-
-### Cloud Anchors setup (optional, Google Cloud)
-
-Without an API key the app still maps and can **reopen prior sessions** to append
-samples. Cloud Anchors only re-align the AR **coordinate origin** across days.
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/) and create/select a project.
-2. Enable **ARCore API** (APIs & Services → Library → “ARCore API”).
-3. Create an **API key** (Credentials → Create credentials → API key).
-   - Restrict the key to the ARCore API.
-   - Optionally restrict by Android app package `com.wifiar.app` + your debug/release SHA-1.
-4. Put the key in **either**:
-   - `local.properties` (preferred, not committed):
-     ```properties
-     arcore.api.key=YOUR_ACTUAL_KEY
-     ```
-   - or replace the placeholder in `AndroidManifest.xml` meta-data
-     `com.google.android.ar.API_KEY`.
-5. Rebuild the app. On **End Session**, if tracking is good, WifiAR hosts a Cloud
-   Anchor (TTL ~30 days) and stores the id on the session.
-6. Next time you start mapping with the **same location name**, choose
-   **Resume previous** — the app resolves the anchor (or falls back to a local
-   origin if resolve fails).
-
-**Privacy:** hosting uploads feature points to Google. Disclose this in demos;
-see [ARCore data privacy](https://developers.google.com/ar/data-privacy).
+Backend: `wifiar-backend/` — FastAPI, PostgreSQL/PostGIS, Alembic, JWT auth.
 
 ---
 
-## Backend setup
+## Performance design (why it stays fast)
+
+- **AR sphere budget** — multi-AP walks can produce *thousands* of sample rows. Rendering is **spatially downsampled** (max ~140 spheres) with strongest RSSI per cell.
+- **Smaller markers** — sample / dead-zone / speed / router balls are intentionally small so the room stays readable.
+- **Heatmap recompute gate** — IDW only re-runs after enough new samples.
+- **Off-main analysis** — heavy work on `Dispatchers.Default`.
+- **Cloud Anchor timeouts** — host/resolve abort after ~12s so End Session never hangs.
+- **SessionManager** — never stacks two active sessions; DB failures clear UI state instead of crashing.
+
+---
+
+## Quick start (Android)
+
+**Requirements:** Android Studio (JDK 17), physical ARCore device, API 26+.
+
+1. Clone & open the repo; Gradle sync.
+2. Connect a USB-debuggable phone with ARCore.
+3. Run the `app` configuration.
+4. First launch → short onboarding → grant **location + camera** (+ nearby Wi‑Fi on Android 13+).
+5. **Map → Start Session** → walk slowly, cover corners → watch balls + heatmap.
+
+### Optional: Cloud Anchors (multi-day origin)
+
+1. Google Cloud → enable **ARCore API** → create API key.
+2. In `local.properties` (not committed):
+   ```properties
+   arcore.api.key=YOUR_KEY
+   ```
+3. Rebuild. On **End Session**, WifiAR may host an anchor; next visit with the same location name → **Resume previous**.
+
+Without a key: sessions still resume *data*; AR origin may not re-align (documented fallback).
+
+### Optional: backend sync
 
 ```bash
 cd wifiar-backend
-docker compose up -d          # PostGIS on :5432
+docker compose up -d
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env          # defaults match docker-compose
+# configure DATABASE_URL / JWT if needed
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-- Health: http://localhost:8000/health  
-- Swagger: http://localhost:8000/docs  
-
-Endpoints: `POST /auth/register`, `POST /auth/login`, session CRUD + bulk points, `GET /sessions/{id}/heatmap` (GP).
+Set `AppConfig.API_BASE_URL` to your PC’s LAN IP for a real device (emulator: `http://10.0.2.2:8000/`).
 
 ---
 
-## Demo script (suggested live order)
+## Demo script (live)
 
-1. **Onboarding** — permissions honesty (location for Wi‑Fi RSSI).  
-2. **Map → Start Session** — walk slowly, cover corners; watch sample count + Best Network Here.  
-3. **Heatmap / Both** — green / yellow / purple / dark-red dead zones.  
-4. **Run Speed Test Here** — cyan checkpoint marker.  
-5. **End Session** — optional Cloud Anchor host + WorkManager sync if logged in.  
-6. **History** — open session → dead zones → **Compare networks** → per-SSID AR heatmap.  
-7. **Suggest router placement** — top 3 + current vs recommended; **Show #1 in AR**.  
-8. **Export & share** — PNG heatmap + CSV via ShareSheet.  
-9. **Account** — register/login, sync pending.  
-10. **Settings** — tweak RSSI thresholds / grid / path-loss preset.
-
----
-
-## Project layout
-
-```
-WifiAR/
-  app/src/main/java/com/wifiar/app/
-    scanner/          Part 1
-    ar/               Parts 2, 4, 10 (Cloud Anchors)
-    data/             Fusion, Room, analysis, export, sync, speedtest
-    ui/               Screens + onboarding + settings
-  wifiar-backend/     Part 7 FastAPI + PostGIS
-  README.md
-```
+1. **Onboarding** — explain location permission honesty.  
+2. **Start Session** — name the room; walk edges + corners.  
+3. **View modes** — Points / Heatmap / Both (segmented control).  
+4. **Dead zone chips** — tap red AR markers.  
+5. **Speed test** — cyan ball + Mbps label.  
+6. **End Session** — optional Cloud host + background sync.  
+7. **History** — export PNG + CSV via ShareSheet.  
+8. **Compare networks** → **Router placement** → golden AR marker.  
+9. **Settings** — tweak RSSI cutoffs / grid / path-loss preset.  
 
 ---
 
-## Report / screenshots checklist
+## Known limitations (state these in viva)
 
-Capture (device): permission rationale · live heatmap · dead zone card · speed test · network comparison table · router #1 AR marker · export share sheet · settings · history empty state.
+1. **Android-only** — iOS does not expose free-form Wi‑Fi RSSI the same way.  
+2. **Scan throttling** — platform limits scan rate; denser maps need patience.  
+3. **Path-loss is simplified** — single exponent `n`, **no walls/materials**.  
+4. **Cloud Anchors** need a Google API key + feature-point upload disclosure.  
+5. **Emulators** are unreliable for Wi‑Fi + ARCore — use a real phone.  
+6. **Coordinates** are AR-local, not GPS floor plans.
+
+---
+
+## UI & product polish (this release)
+
+- Compact Material 3 **typography scale** (less “everything is huge”)
+- Neon **dark cyber** palette with glass HUD over AR
+- Animated **bottom nav**, onboarding pager, calibration card
+- Empty states for history; denser session cards
+- Safe session lifecycle + AR render caps to prevent freezes/crashes
+
+---
+
+## Project status
+
+| Part | Feature |
+|------|---------|
+| 1 | Wi‑Fi scanning |
+| 2 | ARCore pose |
+| 3 | Fusion + Room samples |
+| 4 | IDW heatmap |
+| 5 | Dead zones |
+| 6 | Speed tests |
+| 7 | Backend + sync |
+| 8 | Multi-network compare |
+| 9 | Router placement |
+| 10 | Export, Cloud Anchors, onboarding, settings, polish |
+
+Remaining: report writing, viva prep, professor feedback.
 
 ---
 
 ## License / course use
 
-Student project code — adapt freely for academic submission; document Google ARCore / Cloud data policies if using Cloud Anchors in demos.
+Student project code — adapt freely for academic submission. If you demo Cloud Anchors, disclose Google ARCore data practices.

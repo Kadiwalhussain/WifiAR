@@ -58,29 +58,39 @@ fun AuthScreen(
         Column(
             modifier = modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
                 text = stringResource(R.string.auth_signed_in_as, tokenStore.email.orEmpty()),
-                style = MaterialTheme.typography.titleMedium,
+                style = MaterialTheme.typography.titleSmall,
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Button(
                 onClick = {
                     scope.launch {
                         loading = true
                         error = null
-                        val n = syncManager.syncAllPending()
-                        info = context.getString(R.string.auth_sync_result, n)
+                        info = null
+                        runCatching {
+                            val n = syncManager.syncAllPending()
+                            info = context.getString(R.string.auth_sync_result, n)
+                        }.onFailure {
+                            error = it.message ?: "Sync failed"
+                        }
                         loading = false
                     }
                 },
                 enabled = !loading,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(42.dp),
             ) {
-                Text(stringResource(R.string.auth_sync_now))
+                Text(
+                    stringResource(R.string.auth_sync_now),
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
             Spacer(modifier = Modifier.height(8.dp))
             OutlinedButton(
@@ -90,9 +100,14 @@ fun AuthScreen(
                     error = null
                     onAuthenticated()
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(42.dp),
             ) {
-                Text(stringResource(R.string.auth_logout))
+                Text(
+                    stringResource(R.string.auth_logout),
+                    style = MaterialTheme.typography.labelLarge,
+                )
             }
             if (loading) {
                 Spacer(modifier = Modifier.height(16.dp))
@@ -114,7 +129,7 @@ fun AuthScreen(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(24.dp),
+            .padding(horizontal = 20.dp, vertical = 16.dp),
         verticalArrangement = Arrangement.Center,
     ) {
         Text(

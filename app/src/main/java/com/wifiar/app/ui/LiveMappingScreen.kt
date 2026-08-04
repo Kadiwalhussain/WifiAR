@@ -3,6 +3,8 @@ package com.wifiar.app.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,19 +15,19 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -51,7 +53,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.google.ar.core.Config
 import com.wifiar.app.AppConfig
@@ -72,16 +73,21 @@ import com.wifiar.app.data.analysis.RecommendationCache
 import com.wifiar.app.data.interpolation.HeatmapRecomputeGate
 import com.wifiar.app.data.interpolation.IdwInterpolator
 import com.wifiar.app.data.local.MappingSessionEntity
+import com.wifiar.app.data.local.RssiSampleEntity
 import com.wifiar.app.data.local.SpeedTestEntity
 import com.wifiar.app.data.local.WifiArDatabase
-
 import com.wifiar.app.data.speedtest.SpeedTestError
 import com.wifiar.app.data.speedtest.SpeedTestManager
 import com.wifiar.app.data.speedtest.SpeedTestOutcome
 import com.wifiar.app.data.sync.SyncManager
 import com.wifiar.app.scanner.WifiScanner
-
-
+import com.wifiar.app.ui.components.CompactPrimaryButton
+import com.wifiar.app.ui.components.GlassPanel
+import com.wifiar.app.ui.components.SegmentedControl
+import com.wifiar.app.ui.components.StatusPill
+import com.wifiar.app.ui.theme.NeonCyan
+import com.wifiar.app.ui.theme.NeonMint
+import com.wifiar.app.ui.theme.PanelDark
 import io.github.sceneview.ar.ARSceneView
 import io.github.sceneview.math.Direction
 import io.github.sceneview.math.Position
@@ -94,6 +100,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 
 /** Visualization mode for Live Mapping. */
@@ -270,22 +277,32 @@ fun LiveMappingScreen(
     }
 
     suspend fun beginFreshSession(name: String) {
-        heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
+        runCatching {
+            heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
+        }
         heatmapPlane = null
         deadZones = emptyList()
         selectedDeadZone = null
         recomputeGate.reset()
         cloudStatus = null
+        fusionEngine.stop()
         val session = sessionManager.startSession(name)
+        if (session == null) {
+            cloudStatus = "Could not start session — try again"
+            return
+        }
         fusionEngine.start(session.sessionId)
         wifiScanner.triggerScan()
     }
 
     suspend fun beginResumedSession(past: MappingSessionEntity) {
-        heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
+        runCatching {
+            heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
+        }
         heatmapPlane = null
         deadZones = emptyList()
         recomputeGate.reset()
+        fusionEngine.stop()
         val resumed = sessionManager.resumeSession(past.sessionId)
         if (resumed == null) {
             cloudStatus = context.getString(R.string.cloud_resume_failed)
@@ -298,22 +315,36 @@ fun LiveMappingScreen(
         val sess = arSession
         if (!cloudId.isNullOrBlank() && sess != null && cloudAnchors.isApiKeyConfigured()) {
             cloudStatus = context.getString(R.string.cloud_resolving)
-            when (val r = cloudAnchors.resolve(sess, cloudId)) {
+            val result = withTimeoutOrNull(AppConfig.CLOUD_ANCHOR_TIMEOUT_SEC * 1_000) {
+                cloudAnchors.resolve(sess, cloudId)
+            }
+            when (result) {
                 is CloudAnchorManager.ResolveResult.Success -> {
                     arSessionManager.resetOrigin()
                     cloudStatus = context.getString(R.string.cloud_resume_ok)
-                    runCatching { r.anchor.detach() }
+                    runCatching { result.anchor.detach() }
                 }
                 is CloudAnchorManager.ResolveResult.Failure -> {
                     cloudStatus = context.getString(
                         R.string.cloud_resume_fallback,
-                        r.reason,
+                        result.reason,
+                    )
+                }
+                null -> {
+                    cloudStatus = context.getString(
+                        R.string.cloud_resume_fallback,
+                        "timeout",
                     )
                 }
             }
         } else {
             cloudStatus = context.getString(R.string.cloud_resume_local_only)
         }
+    }
+
+    /** Cap AR spheres so multi-AP walks stay smooth. */
+    val arDisplaySamples = remember(samples) {
+        downsampleSamplesForAr(samples, AppConfig.AR_MAX_SAMPLE_SPHERES)
     }
 
     if (showStartDialog) {
@@ -421,26 +452,29 @@ fun LiveMappingScreen(
 
             if (showHeatmap) {
                 heatmapPlane?.let { plane ->
-                    key(plane.version) {
-                        ImageNode(
-                            bitmap = plane.bitmap,
-                            size = Size(
-                                x = plane.widthMeters,
-                                y = 0.002f,
-                                z = plane.depthMeters,
-                            ),
-                            position = Position(
-                                x = plane.centerX,
-                                y = plane.floorY,
-                                z = plane.centerZ,
-                            ),
-                            normal = Direction(y = 1.0f),
-                        )
+                    // Never upload a recycled bitmap — Filament can native-crash.
+                    if (!plane.bitmap.isRecycled) {
+                        key(plane.version) {
+                            ImageNode(
+                                bitmap = plane.bitmap,
+                                size = Size(
+                                    x = plane.widthMeters,
+                                    y = 0.002f,
+                                    z = plane.depthMeters,
+                                ),
+                                position = Position(
+                                    x = plane.centerX,
+                                    y = plane.floorY,
+                                    z = plane.centerZ,
+                                ),
+                                normal = Direction(y = 1.0f),
+                            )
+                        }
                     }
                 }
 
-                // Dead-zone markers: red sphere + floating label (tappable via name).
-                deadZones.forEach { zone ->
+                // Dead-zone markers: compact red spheres + labels.
+                deadZones.take(12).forEach { zone ->
                     key(zone.id) {
                         val markerY = floorY + AppConfig.DEAD_ZONE_LABEL_HEIGHT_M
                         val nodeName = "$DEAD_ZONE_NODE_PREFIX${zone.id}"
@@ -466,15 +500,15 @@ fun LiveMappingScreen(
                             apply = { name = nodeName },
                         )
                         TextNode(
-                            text = "Dead Zone\n%.0f dBm".format(zone.worstRssiDbm),
-                            fontSize = 36f,
+                            text = "DZ %.0f".format(zone.worstRssiDbm),
+                            fontSize = 22f,
                             textColor = android.graphics.Color.WHITE,
                             backgroundColor = 0xCCB71C1C.toInt(),
-                            widthMeters = 0.55f,
-                            heightMeters = 0.28f,
+                            widthMeters = 0.32f,
+                            heightMeters = 0.14f,
                             position = Position(
                                 x = zone.centroidX,
-                                y = markerY + 0.22f,
+                                y = markerY + 0.12f,
                                 z = zone.centroidZ,
                             ),
                             apply = { name = nodeName },
@@ -484,7 +518,7 @@ fun LiveMappingScreen(
             }
 
             if (showRaw) {
-                samples.forEach { sample ->
+                arDisplaySamples.forEach { sample ->
                     key(sample.id) {
                         val color = rssiTierColor(sample.rssiDbm)
                         val material = remember(loader, color) {
@@ -493,12 +527,12 @@ fun LiveMappingScreen(
                                     loader.createColorInstance(
                                         color = color,
                                         metallic = 0f,
-                                        roughness = 0.8f,
+                                        roughness = 0.55f,
                                     )
                                 }
                         }
                         SphereNode(
-                            radius = 0.06f,
+                            radius = AppConfig.SAMPLE_SPHERE_RADIUS_M,
                             position = Position(
                                 x = sample.poseX,
                                 y = sample.poseY,
@@ -536,7 +570,7 @@ fun LiveMappingScreen(
                         }
                     }
                     SphereNode(
-                        radius = AppConfig.ROUTER_MARKER_RADIUS_M * 1.3f,
+                        radius = AppConfig.ROUTER_MARKER_RADIUS_M * 1.35f,
                         position = Position(x = rec.x, y = rec.y, z = rec.z),
                         materialInstance = glow,
                     )
@@ -547,28 +581,27 @@ fun LiveMappingScreen(
                     )
                     TextNode(
                         text = stringResource(R.string.router_ar_label),
-                        fontSize = 32f,
+                        fontSize = 22f,
                         textColor = android.graphics.Color.BLACK,
                         backgroundColor = 0xCCFFD54F.toInt(),
-                        widthMeters = 0.65f,
-                        heightMeters = 0.26f,
-                        position = Position(x = rec.x, y = rec.y + 0.35f, z = rec.z),
+                        widthMeters = 0.40f,
+                        heightMeters = 0.14f,
+                        position = Position(x = rec.x, y = rec.y + 0.18f, z = rec.z),
                     )
                 }
             }
 
-            // Speed-test checkpoints — cyan markers (distinct from red dead zones).
-            speedTests.forEach { test ->
-
+            // Speed-test checkpoints — compact cyan markers.
+            speedTests.take(24).forEach { test ->
                 key("st-${test.id}") {
                     val markerY = test.poseY
                     val nodeName = "$SPEED_TEST_NODE_PREFIX${test.id}"
                     val cyanMaterial = remember(loader) {
                         runCatching {
-                            loader.createUnlitColorInstance(Color(0xFF00BCD4))
+                            loader.createUnlitColorInstance(Color(0xFF00E5FF))
                         }.getOrElse {
                             loader.createColorInstance(
-                                color = Color(0xFF00BCD4),
+                                color = Color(0xFF00E5FF),
                                 metallic = 0.1f,
                                 roughness = 0.4f,
                             )
@@ -585,19 +618,15 @@ fun LiveMappingScreen(
                         apply = { name = nodeName },
                     )
                     TextNode(
-                        text = "↓%.0f ↑%.0f\n%dms".format(
-                            test.downloadMbps,
-                            test.uploadMbps,
-                            test.pingMs,
-                        ),
-                        fontSize = 32f,
+                        text = "↓%.0f ↑%.0f".format(test.downloadMbps, test.uploadMbps),
+                        fontSize = 20f,
                         textColor = android.graphics.Color.WHITE,
                         backgroundColor = 0xCC006064.toInt(),
-                        widthMeters = 0.50f,
-                        heightMeters = 0.26f,
+                        widthMeters = 0.34f,
+                        heightMeters = 0.12f,
                         position = Position(
                             x = test.poseX,
-                            y = markerY + AppConfig.SPEED_TEST_LABEL_HEIGHT_M * 0.5f,
+                            y = markerY + AppConfig.SPEED_TEST_LABEL_HEIGHT_M * 0.45f,
                             z = test.poseZ,
                         ),
                         apply = { name = nodeName },
@@ -611,7 +640,7 @@ fun LiveMappingScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
-                .padding(12.dp)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
                 .fillMaxWidth(),
         ) {
             MappingStatusCard(
@@ -639,105 +668,121 @@ fun LiveMappingScreen(
                 deadZoneCount = deadZones.size,
                 bestNetwork = bestNetwork,
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             ViewModeRow(
                 mode = viewMode,
                 onModeChange = { viewMode = it },
             )
 
             if (deadZones.isNotEmpty() && showHeatmap) {
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 DeadZoneChipRow(
                     zones = deadZones,
                     onZoneClick = { selectedDeadZone = it },
                 )
             }
             speedTestError?.let { err ->
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = err,
                     color = Color(0xFFFF8A80),
-                    style = MaterialTheme.typography.labelMedium,
+                    style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0xCC000000), RoundedCornerShape(8.dp))
-                        .padding(8.dp),
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
                 )
             }
             cloudStatus?.let { msg ->
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = msg,
-                    color = Color(0xFFB3E5FC),
+                    color = NeonCyan,
                     style = MaterialTheme.typography.labelSmall,
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(Color(0x99000000), RoundedCornerShape(8.dp))
-                        .padding(8.dp),
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
                 )
             }
         }
 
-
         AnimatedVisibility(
             visible = !hasAchievedTracking,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn() + scaleIn(initialScale = 0.92f),
+            exit = fadeOut() + scaleOut(targetScale = 0.96f),
             modifier = Modifier
                 .align(Alignment.Center)
-                .padding(24.dp),
+                .padding(20.dp),
         ) {
-            Text(
-                text = stringResource(R.string.ar_calibration_hint),
-                color = Color.White,
-                textAlign = TextAlign.Center,
-                modifier = Modifier
-                    .background(Color(0xCC0D47A1), RoundedCornerShape(12.dp))
-                    .padding(16.dp),
-            )
+            GlassPanel(tint = PanelDark.copy(alpha = 0.88f), contentPadding = 14.dp) {
+                Text(
+                    text = stringResource(R.string.ar_calibration_title),
+                    color = NeonCyan,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = stringResource(R.string.ar_calibration_hint),
+                    color = Color.White.copy(alpha = 0.9f),
+                    style = MaterialTheme.typography.bodySmall,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
 
-        // Non-blocking speed-test progress (scan/heatmap keep running).
-        if (speedTestRunning) {
-            Card(
-                modifier = Modifier
-                    .align(Alignment.Center)
-                    .padding(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xEE004D40)),
-            ) {
-                Column(
-                    modifier = Modifier.padding(20.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                ) {
-                    CircularProgressIndicator(color = Color.White)
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(
-                        text = stringResource(R.string.speed_test_running),
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleSmall,
-                        textAlign = TextAlign.Center,
-                    )
-                    Text(
-                        text = stringResource(R.string.speed_test_running_hint),
-                        color = Color.White.copy(alpha = 0.8f),
-                        style = MaterialTheme.typography.labelSmall,
-                        textAlign = TextAlign.Center,
-                    )
-                }
+        AnimatedVisibility(
+            visible = speedTestRunning,
+            enter = fadeIn() + scaleIn(initialScale = 0.9f),
+            exit = fadeOut(),
+            modifier = Modifier.align(Alignment.Center),
+        ) {
+            GlassPanel(tint = Color(0xEE004D40), contentPadding = 16.dp) {
+                CircularProgressIndicator(
+                    color = NeonCyan,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .size(28.dp),
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = stringResource(R.string.speed_test_running),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = stringResource(R.string.speed_test_running_hint),
+                    color = Color.White.copy(alpha = 0.75f),
+                    style = MaterialTheme.typography.labelSmall,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
 
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .padding(16.dp)
+                .navigationBarsPadding()
+                .padding(horizontal = 12.dp, vertical = 8.dp)
                 .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             if (activeSession != null) {
-                Button(
+                CompactPrimaryButton(
+                    text = if (speedTestRunning) {
+                        stringResource(R.string.speed_test_running_short)
+                    } else {
+                        stringResource(R.string.speed_test_run_here)
+                    },
                     onClick = {
-                        val session = activeSession ?: return@Button
+                        val session = activeSession ?: return@CompactPrimaryButton
                         val currentPose = pose
                         speedTestError = null
                         scope.launch {
@@ -760,70 +805,79 @@ fun LiveMappingScreen(
                     },
                     enabled = canRunSpeedTest,
                     modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color(0xFF00838F),
-                    ),
-                ) {
-                    Text(
-                        if (speedTestRunning) {
-                            stringResource(R.string.speed_test_running_short)
-                        } else {
-                            stringResource(R.string.speed_test_run_here)
-                        },
-                    )
-                }
+                    containerColor = Color(0xFF00838F),
+                )
                 if (!trackingStable && !speedTestRunning) {
                     Text(
                         text = stringResource(R.string.speed_test_needs_tracking),
                         color = Color(0xFFFFF176),
                         style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 4.dp),
+                        modifier = Modifier.padding(horizontal = 2.dp),
                     )
                 }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (activeSession == null) {
-                    Button(
+                    CompactPrimaryButton(
+                        text = stringResource(R.string.session_start),
                         onClick = {
                             locationName = ""
                             showStartDialog = true
                         },
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.session_start))
-                    }
+                    )
                 } else {
-                    Button(
+                    CompactPrimaryButton(
+                        text = stringResource(R.string.session_end),
                         onClick = {
                             scope.launch {
-                                // Try hosting a Cloud Anchor so the space can be resumed later.
                                 val sess = arSession
                                 val active = activeSession
                                 if (sess != null && active != null && cloudAnchors.isApiKeyConfigured()) {
-                                    val local = cloudAnchors.createLocalAnchorAtCamera(sess)
-                                    if (local != null) {
-                                        cloudStatus = context.getString(R.string.cloud_hosting)
-                                        when (val h = cloudAnchors.host(sess, local)) {
-                                            is CloudAnchorManager.HostResult.Success -> {
-                                                sessionManager.attachCloudAnchor(
-                                                    active.sessionId,
-                                                    h.cloudAnchorId,
-                                                )
-                                                cloudStatus = context.getString(R.string.cloud_host_ok)
-                                            }
-                                            is CloudAnchorManager.HostResult.Failure -> {
-                                                cloudStatus = context.getString(
-                                                    R.string.cloud_host_fail,
-                                                    h.reason,
-                                                )
+                                    cloudStatus = context.getString(R.string.cloud_hosting)
+                                    val hostResult = withTimeoutOrNull(
+                                        AppConfig.CLOUD_ANCHOR_TIMEOUT_SEC * 1_000,
+                                    ) {
+                                        // Prefer pose from our frame pipeline (avoids fighting SceneView update).
+                                        val p = pose
+                                        val arPose = com.google.ar.core.Pose.makeTranslation(p.x, p.y, p.z)
+                                        val local = cloudAnchors.createLocalAnchor(sess, arPose)
+                                            ?: cloudAnchors.createLocalAnchorAtCamera(sess)
+                                        if (local == null) {
+                                            CloudAnchorManager.HostResult.Failure("no tracking")
+                                        } else {
+                                            try {
+                                                cloudAnchors.host(sess, local)
+                                            } finally {
+                                                runCatching { local.detach() }
                                             }
                                         }
-                                        runCatching { local.detach() }
+                                    }
+                                    when (hostResult) {
+                                        is CloudAnchorManager.HostResult.Success -> {
+                                            sessionManager.attachCloudAnchor(
+                                                active.sessionId,
+                                                hostResult.cloudAnchorId,
+                                            )
+                                            cloudStatus = context.getString(R.string.cloud_host_ok)
+                                        }
+                                        is CloudAnchorManager.HostResult.Failure -> {
+                                            cloudStatus = context.getString(
+                                                R.string.cloud_host_fail,
+                                                hostResult.reason,
+                                            )
+                                        }
+                                        null -> {
+                                            cloudStatus = context.getString(
+                                                R.string.cloud_host_fail,
+                                                "timeout",
+                                            )
+                                        }
                                     }
                                 }
                                 fusionEngine.stop()
@@ -832,18 +886,16 @@ fun LiveMappingScreen(
                             }
                         },
                         modifier = Modifier.weight(1f),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                        ),
-                    ) {
-                        Text(stringResource(R.string.session_end))
-                    }
-
-
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    )
                     OutlinedButton(
                         onClick = { wifiScanner.triggerScan() },
                         enabled = cooldown == 0L && !isScanning,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp),
+                        shape = RoundedCornerShape(12.dp),
                     ) {
                         Text(
                             if (isScanning) {
@@ -851,6 +903,7 @@ fun LiveMappingScreen(
                             } else {
                                 stringResource(R.string.scan_now)
                             },
+                            style = MaterialTheme.typography.labelLarge,
                         )
                     }
                 }
@@ -876,19 +929,48 @@ private data class AnalysisResult(
     val computeMs: Long,
 )
 
+/**
+ * Spatial + strength downsample so AR never draws thousands of spheres.
+ * Keeps strongest sample per coarse cell, then caps to [maxPoints].
+ */
+private fun downsampleSamplesForAr(
+    samples: List<RssiSampleEntity>,
+    maxPoints: Int,
+): List<RssiSampleEntity> {
+    if (samples.size <= maxPoints) return samples
+    val cell = 0.40f
+    val best = LinkedHashMap<String, RssiSampleEntity>(samples.size.coerceAtMost(512))
+    for (s in samples) {
+        val key = "${(s.poseX / cell).toInt()}_${(s.poseZ / cell).toInt()}_${s.bssid.takeLast(8)}"
+        val prev = best[key]
+        if (prev == null || s.rssiDbm > prev.rssiDbm) best[key] = s
+    }
+    val reduced = best.values.toList()
+    if (reduced.size <= maxPoints) return reduced
+    val step = (reduced.size.toFloat() / maxPoints).coerceAtLeast(1f)
+    val out = ArrayList<RssiSampleEntity>(maxPoints)
+    var i = 0f
+    while (i < reduced.size && out.size < maxPoints) {
+        out.add(reduced[i.toInt()])
+        i += step
+    }
+    return out
+}
+
 @Composable
 private fun DeadZoneChipRow(
     zones: List<DeadZoneRegion>,
     onZoneClick: (DeadZoneRegion) -> Unit,
 ) {
     LazyRow(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         items(zones, key = { it.id }) { zone ->
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xCCB71C1C)),
                 modifier = Modifier.clickable { onZoneClick(zone) },
+                shape = RoundedCornerShape(10.dp),
             ) {
                 Text(
                     text = stringResource(
@@ -897,8 +979,8 @@ private fun DeadZoneChipRow(
                         zone.worstRssiDbm,
                     ),
                     color = Color.White,
-                    style = MaterialTheme.typography.labelMedium,
-                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                 )
             }
         }
@@ -1027,29 +1109,29 @@ private fun ViewModeRow(
     mode: MappingViewMode,
     onModeChange: (MappingViewMode) -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0x99000000), RoundedCornerShape(12.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-    ) {
-        FilterChip(
-            selected = mode == MappingViewMode.RAW_POINTS,
-            onClick = { onModeChange(MappingViewMode.RAW_POINTS) },
-            label = { Text(stringResource(R.string.view_raw_points)) },
-        )
-        FilterChip(
-            selected = mode == MappingViewMode.HEATMAP,
-            onClick = { onModeChange(MappingViewMode.HEATMAP) },
-            label = { Text(stringResource(R.string.view_heatmap)) },
-        )
-        FilterChip(
-            selected = mode == MappingViewMode.BOTH,
-            onClick = { onModeChange(MappingViewMode.BOTH) },
-            label = { Text(stringResource(R.string.view_both)) },
-        )
+    val options = listOf(
+        stringResource(R.string.view_raw_points),
+        stringResource(R.string.view_heatmap),
+        stringResource(R.string.view_both),
+    )
+    val index = when (mode) {
+        MappingViewMode.RAW_POINTS -> 0
+        MappingViewMode.HEATMAP -> 1
+        MappingViewMode.BOTH -> 2
     }
+    SegmentedControl(
+        options = options,
+        selectedIndex = index,
+        onSelect = {
+            onModeChange(
+                when (it) {
+                    0 -> MappingViewMode.RAW_POINTS
+                    1 -> MappingViewMode.HEATMAP
+                    else -> MappingViewMode.BOTH
+                },
+            )
+        },
+    )
 }
 
 @Composable
@@ -1065,25 +1147,37 @@ private fun MappingStatusCard(
     deadZoneCount: Int,
     bestNetwork: BestNetworkEstimate? = null,
 ) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .background(Color(0xBB000000), RoundedCornerShape(12.dp))
-            .padding(12.dp),
+    GlassPanel(
+        modifier = Modifier.fillMaxWidth(),
+        tint = PanelDark,
+        contentPadding = 10.dp,
+        corner = 14.dp,
     ) {
-        Text(
-            text = stringResource(R.string.samples_collected, sampleCount),
-            color = Color.White,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.SemiBold,
-        )
-        if (sessionLabel != null) {
-            Text(
-                text = sessionLabel,
-                color = Color.White.copy(alpha = 0.85f),
-                style = MaterialTheme.typography.bodyMedium,
-            )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = stringResource(R.string.samples_collected, sampleCount),
+                    color = Color.White,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                if (sessionLabel != null) {
+                    Text(
+                        text = sessionLabel,
+                        color = Color.White.copy(alpha = 0.75f),
+                        style = MaterialTheme.typography.labelSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            StatusPill(label = trackingLabel, ok = trackingOk)
         }
+
         bestNetwork?.let { best ->
             Spacer(modifier = Modifier.height(6.dp))
             Text(
@@ -1092,71 +1186,50 @@ private fun MappingStatusCard(
                     best.key.displayName,
                     best.rssiDbm,
                 ),
-                color = Color(0xFF80D8FF),
-                style = MaterialTheme.typography.labelLarge,
+                color = NeonCyan,
+                style = MaterialTheme.typography.labelMedium,
                 fontWeight = FontWeight.Bold,
-            )
-            Text(
-                text = best.key.bssid,
-                color = Color(0xFF80D8FF).copy(alpha = 0.75f),
-                style = MaterialTheme.typography.labelSmall,
-                fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Spacer(modifier = Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = if (isFusing) {
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            StatusPill(
+                label = if (isFusing) {
                     stringResource(R.string.fusion_active)
                 } else {
                     stringResource(R.string.fusion_idle)
                 },
-                color = if (isFusing) Color(0xFF69F0AE) else Color.White.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.labelMedium,
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-            Text(
-                text = trackingLabel,
-                color = if (trackingOk) Color(0xFF69F0AE) else Color(0xFFFFAB40),
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.Bold,
+                ok = isFusing,
             )
             if (cooldownSeconds > 0L) {
-                Spacer(modifier = Modifier.width(12.dp))
                 Text(
                     text = stringResource(R.string.cooldown_format, cooldownSeconds),
                     color = Color(0xFFFFF176),
                     style = MaterialTheme.typography.labelSmall,
                 )
             }
-        }
-        if (deadZoneCount > 0) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = stringResource(R.string.dead_zones_found, deadZoneCount),
-                color = Color(0xFFFF8A80),
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-            )
+            if (deadZoneCount > 0) {
+                Text(
+                    text = stringResource(R.string.dead_zones_found, deadZoneCount),
+                    color = Color(0xFFFF8A80),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
         }
         fusionError?.let {
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = it,
-                color = Color(0xFFFF8A80),
-                style = MaterialTheme.typography.labelSmall,
-            )
+            Text(text = it, color = Color(0xFFFF8A80), style = MaterialTheme.typography.labelSmall)
         }
         heatmapInfo?.let {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = it,
-                color = Color(0xFFB3E5FC),
-                style = MaterialTheme.typography.labelSmall,
-            )
+            Spacer(modifier = Modifier.height(3.dp))
+            Text(text = it, color = NeonMint.copy(alpha = 0.9f), style = MaterialTheme.typography.labelSmall)
         }
         Spacer(modifier = Modifier.height(6.dp))
         LegendRow()
@@ -1165,11 +1238,14 @@ private fun MappingStatusCard(
 
 @Composable
 private fun LegendRow() {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        LegendSwatch(Color(0xFF2E7D32), "≥ -50")
-        LegendSwatch(Color(0xFFF9A825), "-50…-70")
-        LegendSwatch(Color(0xFF6A1B9A), "< -70")
-        LegendSwatch(Color(0xFF8B0000), "≤ ${AppConfig.DEAD_ZONE_THRESHOLD_DBM}")
+    val strong = UserPreferences.rssiStrongDbm
+    val medium = UserPreferences.rssiMediumDbm
+    val dead = UserPreferences.rssiDeadDbm
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        LegendSwatch(Color(0xFF00E676), "≥$strong")
+        LegendSwatch(Color(0xFFFFD740), "$strong…$medium")
+        LegendSwatch(Color(0xFFE040FB), "<$medium")
+        LegendSwatch(Color(0xFF8B0000), "≤$dead")
     }
 }
 
@@ -1178,14 +1254,14 @@ private fun LegendSwatch(color: Color, label: String) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
-                .width(10.dp)
-                .height(10.dp)
+                .width(8.dp)
+                .height(8.dp)
                 .background(color, RoundedCornerShape(50)),
         )
-        Spacer(modifier = Modifier.width(4.dp))
+        Spacer(modifier = Modifier.width(3.dp))
         Text(
             text = label,
-            color = Color.White.copy(alpha = 0.8f),
+            color = Color.White.copy(alpha = 0.75f),
             style = MaterialTheme.typography.labelSmall,
         )
     }

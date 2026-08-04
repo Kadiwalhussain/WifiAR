@@ -149,6 +149,23 @@ class CloudAnchorManager(
     /**
      * Create a temporary local anchor at the camera pose if tracking is good.
      */
+    /**
+     * Create a temporary local anchor at [worldPose] (ARCore Pose meters).
+     * Prefer this over calling [Session.update] from UI threads — SceneView owns the frame loop.
+     */
+    fun createLocalAnchor(
+        session: Session,
+        worldPose: com.google.ar.core.Pose,
+    ): Anchor? {
+        return runCatching {
+            session.createAnchor(worldPose)
+        }.getOrNull()
+    }
+
+    /**
+     * Best-effort camera anchor. Safe to call only when ARCore allows an extra update;
+     * returns null on failure instead of crashing.
+     */
     fun createLocalAnchorAtCamera(session: Session): Anchor? {
         return runCatching {
             val frame = session.update()

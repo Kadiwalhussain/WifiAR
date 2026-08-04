@@ -16,11 +16,21 @@ object AppConfig {
     /** Minimum connected cells for a region to be reported (filters single-cell noise). */
     const val DEAD_ZONE_MIN_CELLS: Int = 2
 
-    /** Marker sphere radius in metres for dead-zone centroids in AR. */
-    const val DEAD_ZONE_MARKER_RADIUS_M: Float = 0.12f
+    /** Marker sphere radius in metres for dead-zone centroids in AR (kept small for clarity). */
+    const val DEAD_ZONE_MARKER_RADIUS_M: Float = 0.055f
 
     /** How high above the floor plane to float dead-zone labels (metres). */
-    const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.45f
+    const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.28f
+
+    /** Raw-sample sphere radius in AR (metres). */
+    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.028f
+
+    /**
+     * Max raw sample spheres drawn in AR at once.
+     * Full multi-AP scans can produce thousands of DB rows — rendering all of
+     * them freezes Filament. Spatial downsample keeps the HUD fast.
+     */
+    const val AR_MAX_SAMPLE_SPHERES: Int = 140
 
     // ── Speed test (Part 6) ──────────────────────────────────────────────────
 
@@ -57,9 +67,9 @@ object AppConfig {
     const val SPEED_TEST_TIMEOUT_MS: Int = 20_000
 
     /** AR marker size for speed-test checkpoints. */
-    const val SPEED_TEST_MARKER_RADIUS_M: Float = 0.10f
+    const val SPEED_TEST_MARKER_RADIUS_M: Float = 0.05f
 
-    const val SPEED_TEST_LABEL_HEIGHT_M: Float = 0.50f
+    const val SPEED_TEST_LABEL_HEIGHT_M: Float = 0.28f
 
     // ── Backend sync (Part 7) ────────────────────────────────────────────────
 
@@ -119,7 +129,10 @@ object AppConfig {
     const val ROUTER_RECOMMEND_MIN_SAMPLES: Int = 15
 
     /** AR marker radius for recommended router spot. */
-    const val ROUTER_MARKER_RADIUS_M: Float = 0.18f
+    const val ROUTER_MARKER_RADIUS_M: Float = 0.08f
+
+    /** Max seconds to wait for Cloud Anchor host/resolve before falling back. */
+    const val CLOUD_ANCHOR_TIMEOUT_SEC: Long = 12L
 }
 
 
