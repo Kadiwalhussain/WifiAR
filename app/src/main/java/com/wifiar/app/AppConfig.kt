@@ -23,25 +23,25 @@ object AppConfig {
     const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.28f
 
     /**
-     * Floating RSSI ball radius (metres) — large enough to read like demo apps.
-     * (~12 cm diameter feels solid in a room-scale walk).
+     * Floating RSSI ball radius (metres).
+     * Smaller = less GPU fill + fewer crashes on mid-range phones.
      */
-    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.12f
+    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.09f
 
     /**
-     * Max floating sample spheres in AR.
-     * Labels are capped separately — keep total Filament nodes under control.
+     * Hard cap on AR sample spheres.
+     * Each ball is expensive; keep this low for smooth 30–60 fps.
      */
-    const val AR_MAX_SAMPLE_SPHERES: Int = 48
+    const val AR_MAX_SAMPLE_SPHERES: Int = 20
 
-    /** Max billboard RSSI labels (textures are heavier than spheres). */
-    const val AR_MAX_RSSI_LABELS: Int = 18
+    /** Max RSSI text labels (bitmap textures are the #1 lag source). */
+    const val AR_MAX_RSSI_LABELS: Int = 6
 
-    /** Max path polyline points for the cyan walk trail. */
-    const val AR_MAX_PATH_POINTS: Int = 64
+    /** Max walk-path polyline vertices. */
+    const val AR_MAX_PATH_POINTS: Int = 28
 
-    /** Vertical stem thickness (metres). */
-    const val AR_STEM_RADIUS_M: Float = 0.008f
+    /** How high above estimated floor to float signal balls (metres). */
+    const val AR_BALL_HEIGHT_ABOVE_FLOOR_M: Float = 1.05f
 
     // ── Speed test (Part 6) ──────────────────────────────────────────────────
 

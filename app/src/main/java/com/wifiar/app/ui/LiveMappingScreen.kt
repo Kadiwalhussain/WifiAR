@@ -449,10 +449,45 @@ fun LiveMappingScreen(
 
     Box(modifier = modifier.fillMaxSize()) {
 
+        // Ground first: no signal overlays until AR tracking is solid.
+        val groundReady = hasAchievedTracking &&
+            tracking.quality == TrackingQuality.TRACKING
+
+        val pathSamples = remember(arDisplaySamples) {
+            arDisplaySamples
+                .filter {
+                    it.poseX.isFinite() && it.poseZ.isFinite() &&
+                        abs(it.poseX) < 100f && abs(it.poseZ) < 100f
+                }
+                .sortedBy { it.timestampMs }
+                .takeLast(AppConfig.AR_MAX_SAMPLE_SPHERES)
+        }
+        val floorYHint = remember(heatmapPlane?.floorY, pose.y, groundReady) {
+            when {
+                heatmapPlane?.floorY?.isFinite() == true -> heatmapPlane!!.floorY
+                groundReady && pose.y.isFinite() ->
+                    pose.y - AppConfig.AR_BALL_HEIGHT_ABOVE_FLOOR_M
+                else -> 0f
+            }
+        }
+        val pathFloorY = floorYHint + 0.015f
+        val ballHeight = pathFloorY + AppConfig.AR_BALL_HEIGHT_ABOVE_FLOOR_M
+        val pathPoints = remember(pathSamples, pathFloorY) {
+            buildWalkPathPoints(
+                pathSamples.takeLast(AppConfig.AR_MAX_PATH_POINTS),
+                pathFloorY,
+            )
+        }
+        val labeledIds = remember(pathSamples) {
+            pathSamples.takeLast(AppConfig.AR_MAX_RSSI_LABELS).map { it.id }.toSet()
+        }
+        val showSignals = groundReady && activeSession != null
+
         ARSceneView(
             modifier = Modifier.fillMaxSize(),
+            // Planes help user understand the ground first; light cost vs hundreds of nodes.
             planeRenderer = true,
-            planeFindingMode = Config.PlaneFindingMode.HORIZONTAL_AND_VERTICAL,
+            planeFindingMode = Config.PlaneFindingMode.HORIZONTAL,
             sessionConfiguration = { session, config ->
                 cloudAnchors.applyCloudConfig(session, config)
             },
@@ -474,198 +509,145 @@ fun LiveMappingScreen(
             },
             onGestureListener = gestureListener,
         ) {
-
             val loader = materialLoader
-            val floorY = heatmapPlane?.floorY ?: 0f
-
-            // Shared materials (few instances) — avoid per-sample material thrash / OOM.
             fun unlit(color: Color) = runCatching {
                 loader.createUnlitColorInstance(color)
             }.getOrElse {
-                loader.createColorInstance(color = color, metallic = 0f, roughness = 0.45f)
+                loader.createColorInstance(color = color, metallic = 0f, roughness = 0.5f)
             }
-            val matStrong = remember(loader) { unlit(Color(0xFF9CCC65)) } // soft lime like demos
-            val matMedium = remember(loader) { unlit(Color(0xFFFFD54F)) }
-            val matWeak = remember(loader) { unlit(Color(0xFFFF8A65)) }
+            val matStrong = remember(loader) { unlit(Color(0xFF66BB6A)) }
+            val matMedium = remember(loader) { unlit(Color(0xFFFFEE58)) }
+            val matWeak = remember(loader) { unlit(Color(0xFFFF7043)) }
             val matDead = remember(loader) { unlit(Color(0xFFE53935)) }
-            val matPath = remember(loader) { unlit(Color(0xFF00E5C3)) } // cyan trail
-            val matStem = remember(loader) { unlit(Color(0x99FFFFFF)) }
+            val matPath = remember(loader) { unlit(Color(0xFF00E5C3)) }
             val matRouter = remember(loader) { unlit(Color(0xFFFF6F00)) }
-            val matSpeed = remember(loader) { unlit(Color(0xFF00E5FF)) }
-            val matFloorDot = remember(loader) { unlit(Color(0x5500E5C3)) }
+            val matSpeed = remember(loader) { unlit(Color(0xFF00B8D4)) }
 
-            val pathFloorY = when {
-                floorY.isFinite() -> floorY + 0.02f
-                else -> 0.02f
-            }
-            // Sort once for trail + stems (oldest → newest).
-            val pathSamples = remember(arDisplaySamples) {
-                arDisplaySamples
-                    .filter {
-                        it.poseX.isFinite() && it.poseZ.isFinite() &&
-                            abs(it.poseX) < 200f && abs(it.poseZ) < 200f
+            if (showSignals) {
+                // 1) Path on floor
+                if (pathPoints.size >= 2) {
+                    key("walk-path") {
+                        PathNode(
+                            points = pathPoints,
+                            closed = false,
+                            materialInstance = matPath,
+                        )
                     }
-                    .sortedBy { it.timestampMs }
-                    .takeLast(AppConfig.AR_MAX_PATH_POINTS)
-            }
-            val pathPoints = remember(pathSamples, pathFloorY) {
-                buildWalkPathPoints(pathSamples, pathFloorY)
-            }
-            val labeledIds = remember(pathSamples) {
-                pathSamples.takeLast(AppConfig.AR_MAX_RSSI_LABELS).map { it.id }.toSet()
-            }
-
-            // ── Cyan walk path on the floor (demo-style) ──────────────────────
-            if (pathPoints.size >= 2 && (showRaw || showHeatmap)) {
-                key("walk-path-${pathPoints.size}") {
-                    PathNode(
-                        points = pathPoints,
-                        closed = false,
-                        materialInstance = matPath,
-                    )
                 }
-            }
 
-            if (showHeatmap) {
-                heatmapPlane?.let { plane ->
-                    val bmp = plane.bitmap
-                    if (!bmp.isRecycled &&
-                        plane.widthMeters.isFinite() &&
-                        plane.depthMeters.isFinite() &&
-                        plane.widthMeters > 0f &&
-                        plane.depthMeters > 0f
-                    ) {
-                        key(plane.version) {
-                            ImageNode(
-                                bitmap = bmp,
-                                size = Size(
-                                    x = plane.widthMeters.coerceIn(0.05f, 80f),
-                                    y = 0.002f,
-                                    z = plane.depthMeters.coerceIn(0.05f, 80f),
-                                ),
+                // 2) Heatmap
+                if (showHeatmap) {
+                    heatmapPlane?.let { plane ->
+                        val bmp = plane.bitmap
+                        if (!bmp.isRecycled &&
+                            plane.widthMeters.isFinite() &&
+                            plane.depthMeters.isFinite() &&
+                            plane.widthMeters > 0.1f &&
+                            plane.depthMeters > 0.1f
+                        ) {
+                            key(plane.version) {
+                                ImageNode(
+                                    bitmap = bmp,
+                                    size = Size(
+                                        x = plane.widthMeters.coerceIn(0.1f, 40f),
+                                        y = 0.002f,
+                                        z = plane.depthMeters.coerceIn(0.1f, 40f),
+                                    ),
+                                    position = Position(
+                                        x = plane.centerX.safeCoord(),
+                                        y = plane.floorY.safeCoord(pathFloorY),
+                                        z = plane.centerZ.safeCoord(),
+                                    ),
+                                    normal = Direction(y = 1.0f),
+                                )
+                            }
+                        }
+                    }
+                    deadZones.take(3).forEach { zone ->
+                        key("dz-${zone.id}") {
+                            SphereNode(
+                                radius = AppConfig.DEAD_ZONE_MARKER_RADIUS_M,
                                 position = Position(
-                                    x = plane.centerX.safeCoord(),
-                                    y = plane.floorY.safeCoord(),
-                                    z = plane.centerZ.safeCoord(),
+                                    x = zone.centroidX.safeCoord(),
+                                    y = (pathFloorY + 0.2f).safeCoord(),
+                                    z = zone.centroidZ.safeCoord(),
                                 ),
-                                normal = Direction(y = 1.0f),
+                                materialInstance = matDead,
+                                apply = { name = "$DEAD_ZONE_NODE_PREFIX${zone.id}" },
                             )
                         }
                     }
                 }
 
-                deadZones.take(6).forEach { zone ->
-                    key("dz-${zone.id}") {
-                        val markerY = (pathFloorY + AppConfig.DEAD_ZONE_LABEL_HEIGHT_M).safeCoord()
+                // 3) Signal balls (RSSI). Yellow = medium strength.
+                if (showRaw) {
+                    pathSamples.forEach { sample ->
+                        key("b-${sample.id}") {
+                            val mat = when {
+                                sample.rssiDbm >= UserPreferences.rssiStrongDbm -> matStrong
+                                sample.rssiDbm >= UserPreferences.rssiMediumDbm -> matMedium
+                                sample.rssiDbm >= UserPreferences.rssiDeadDbm -> matWeak
+                                else -> matDead
+                            }
+                            val x = sample.poseX.safeCoord()
+                            val z = sample.poseZ.safeCoord()
+                            val y = ballHeight.safeCoord(1.1f)
+                            SphereNode(
+                                radius = AppConfig.SAMPLE_SPHERE_RADIUS_M,
+                                position = Position(x = x, y = y, z = z),
+                                materialInstance = mat,
+                            )
+                            if (sample.id in labeledIds) {
+                                TextNode(
+                                    text = "${sample.rssiDbm} dBm",
+                                    fontSize = 40f,
+                                    textColor = android.graphics.Color.WHITE,
+                                    backgroundColor = 0x99000000.toInt(),
+                                    widthMeters = 0.38f,
+                                    heightMeters = 0.12f,
+                                    position = Position(x = x, y = y + 0.14f, z = z),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                RecommendationCache.topPosition?.let { rec ->
+                    key("router-rec") {
                         SphereNode(
-                            radius = AppConfig.DEAD_ZONE_MARKER_RADIUS_M,
+                            radius = AppConfig.ROUTER_MARKER_RADIUS_M,
                             position = Position(
-                                x = zone.centroidX.safeCoord(),
-                                y = markerY,
-                                z = zone.centroidZ.safeCoord(),
+                                x = rec.x.safeCoord(),
+                                y = rec.y.safeCoord(ballHeight),
+                                z = rec.z.safeCoord(),
                             ),
-                            materialInstance = matDead,
-                            apply = { name = "$DEAD_ZONE_NODE_PREFIX${zone.id}" },
+                            materialInstance = matRouter,
                         )
                     }
                 }
-            }
 
-            // ── Floating RSSI balls + stems + labels (like the reference demo) ─
-            if (showRaw) {
-                val fallbackBallY = pathFloorY + 1.15f
-                pathSamples.forEach { sample ->
-                    key("ball-${sample.id}") {
-                        val mat = when {
-                            sample.rssiDbm >= UserPreferences.rssiStrongDbm -> matStrong
-                            sample.rssiDbm >= UserPreferences.rssiMediumDbm -> matMedium
-                            sample.rssiDbm >= UserPreferences.rssiDeadDbm -> matWeak
-                            else -> matDead
-                        }
-                        val x = sample.poseX.safeCoord()
-                        val z = sample.poseZ.safeCoord()
-                        // Prefer measured device height so balls float in the air.
-                        val ballY = when {
-                            sample.poseY.isFinite() && abs(sample.poseY) > 0.05f ->
-                                sample.poseY.safeCoord(fallbackBallY)
-                            else -> fallbackBallY
-                        }
-                        val r = AppConfig.SAMPLE_SPHERE_RADIUS_M
-
-                        // Floor anchor dot
+                // 4) Speed tests — cyan balls with Mbps/kbps (not RSSI)
+                speedTests.take(3).forEach { test ->
+                    key("st-${test.id}") {
+                        val sx = test.poseX.safeCoord()
+                        val sy = test.poseY.safeCoord(ballHeight)
+                        val sz = test.poseZ.safeCoord()
                         SphereNode(
-                            radius = r * 0.22f,
-                            position = Position(x = x, y = pathFloorY, z = z),
-                            materialInstance = matFloorDot,
+                            radius = AppConfig.SPEED_TEST_MARKER_RADIUS_M,
+                            position = Position(x = sx, y = sy, z = sz),
+                            materialInstance = matSpeed,
+                            apply = { name = "$SPEED_TEST_NODE_PREFIX${test.id}" },
                         )
-
-                        // Vertical stem (floor → ball) — demo dashed-line feel via thin line
-                        LineNode(
-                            start = Position(x = x, y = pathFloorY, z = z),
-                            end = Position(x = x, y = (ballY - r * 0.85f).safeCoord(pathFloorY + 0.2f), z = z),
-                            materialInstance = matStem,
+                        TextNode(
+                            text = "↓ ${SpeedFormat.formatMbps(test.downloadMbps)}\n↑ ${SpeedFormat.formatMbps(test.uploadMbps)}",
+                            fontSize = 34f,
+                            textColor = android.graphics.Color.WHITE,
+                            backgroundColor = 0xDD006064.toInt(),
+                            widthMeters = 0.44f,
+                            heightMeters = 0.22f,
+                            position = Position(x = sx, y = sy + 0.18f, z = sz),
                         )
-
-                        // Main signal ball
-                        SphereNode(
-                            radius = r,
-                            position = Position(x = x, y = ballY, z = z),
-                            materialInstance = mat,
-                        )
-
-                        // RSSI number on / above the ball (capped — textures are heavy)
-                        if (sample.id in labeledIds) {
-                            TextNode(
-                                text = "${sample.rssiDbm}",
-                                fontSize = 52f,
-                                textColor = android.graphics.Color.WHITE,
-                                backgroundColor = 0x00000000,
-                                widthMeters = 0.28f,
-                                heightMeters = 0.14f,
-                                position = Position(x = x, y = ballY + 0.02f, z = z),
-                            )
-                        }
                     }
-                }
-            }
-
-            RecommendationCache.topPosition?.let { rec ->
-                key("router-rec-live") {
-                    SphereNode(
-                        radius = AppConfig.ROUTER_MARKER_RADIUS_M,
-                        position = Position(
-                            x = rec.x.safeCoord(),
-                            y = rec.y.safeCoord(),
-                            z = rec.z.safeCoord(),
-                        ),
-                        materialInstance = matRouter,
-                    )
-                }
-            }
-
-            speedTests.take(10).forEach { test ->
-                key("st-${test.id}") {
-                    val sx = test.poseX.safeCoord()
-                    val sy = test.poseY.safeCoord(0.9f)
-                    val sz = test.poseZ.safeCoord()
-                    SphereNode(
-                        radius = AppConfig.SPEED_TEST_MARKER_RADIUS_M,
-                        position = Position(x = sx, y = sy, z = sz),
-                        materialInstance = matSpeed,
-                        apply = { name = "$SPEED_TEST_NODE_PREFIX${test.id}" },
-                    )
-                    TextNode(
-                        text = SpeedFormat.formatPairCompact(
-                            test.downloadMbps,
-                            test.uploadMbps,
-                        ),
-                        fontSize = 36f,
-                        textColor = android.graphics.Color.WHITE,
-                        backgroundColor = 0xCC006064.toInt(),
-                        widthMeters = 0.48f,
-                        heightMeters = 0.14f,
-                        position = Position(x = sx, y = sy + 0.16f, z = sz),
-                    )
                 }
             }
         }
@@ -702,6 +684,13 @@ fun LiveMappingScreen(
                 },
                 deadZoneCount = deadZones.size,
                 bestNetwork = bestNetwork,
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            // Always-visible guide: what balls / colors / path / speed mean
+            SignalGuideCard(
+                groundReady = groundReady,
+                isSessionActive = activeSession != null,
+                lastSpeed = lastSpeedBanner,
             )
             Spacer(modifier = Modifier.height(6.dp))
             ViewModeRow(
@@ -1030,10 +1019,10 @@ private fun buildWalkPathPoints(
     floorY: Float,
 ): List<Position> {
     if (samples.isEmpty()) return emptyList()
-    val out = ArrayList<Position>(samples.size)
+    val out = ArrayList<Position>(samples.size.coerceAtMost(AppConfig.AR_MAX_PATH_POINTS))
     var lastX = Float.NaN
     var lastZ = Float.NaN
-    val minStep = 0.08f // metres — ignore micro jitter
+    val minStep = 0.18f // coarser = fewer path segments = less lag
     for (s in samples) {
         val x = s.poseX.safeCoord()
         val z = s.poseZ.safeCoord()
@@ -1044,6 +1033,7 @@ private fun buildWalkPathPoints(
         out.add(Position(x = x, y = floorY, z = z))
         lastX = x
         lastZ = z
+        if (out.size >= AppConfig.AR_MAX_PATH_POINTS) break
     }
     return out
 }
@@ -1229,6 +1219,75 @@ private fun ViewModeRow(
             )
         },
     )
+}
+
+/**
+ * Explains balls, colors (incl. yellow), path, and speed — always readable in the HUD.
+ */
+@Composable
+private fun SignalGuideCard(
+    groundReady: Boolean,
+    isSessionActive: Boolean,
+    lastSpeed: String?,
+) {
+    GlassPanel(
+        modifier = Modifier.fillMaxWidth(),
+        tint = PanelDark.copy(alpha = 0.92f),
+        contentPadding = 10.dp,
+        corner = 12.dp,
+    ) {
+        Text(
+            text = when {
+                !groundReady -> "① Move phone slowly until AR locks the floor (planes appear)."
+                !isSessionActive -> "② Floor locked. Tap Start Session, then walk the room."
+                else -> "③ Mapping: cyan line = path · balls = Wi‑Fi strength at that spot"
+            },
+            color = Color.White,
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GuideChip(Color(0xFF66BB6A), "Green strong")
+            GuideChip(Color(0xFFFFEE58), "Yellow medium")
+            GuideChip(Color(0xFFFF7043), "Orange weak")
+            GuideChip(Color(0xFFE53935), "Red dead")
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Ball number = RSSI in dBm (higher is better, e.g. −45 > −70). " +
+                "Yellow means medium coverage — usable but not peak. " +
+                "Cyan ball = speed test (Mbps/kbps).",
+            color = Color.White.copy(alpha = 0.78f),
+            style = MaterialTheme.typography.labelSmall,
+        )
+        if (lastSpeed != null) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "Last speed: $lastSpeed",
+                color = NeonMint,
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = FontWeight.Bold,
+            )
+        }
+    }
+}
+
+@Composable
+private fun GuideChip(color: Color, label: String) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(color, RoundedCornerShape(50)),
+        )
+        Spacer(modifier = Modifier.width(3.dp))
+        Text(
+            text = label,
+            color = Color.White.copy(alpha = 0.85f),
+            style = MaterialTheme.typography.labelSmall,
+        )
+    }
 }
 
 @Composable
