@@ -23,10 +23,10 @@ val PanelDark = Color(0xE6121A26)
 val PanelLight = Color(0xF2FFFFFF)
 val GlassStroke = Color(0x33FFFFFF)
 
-val RssiStrong = Color(0xFF00E676)
-val RssiMedium = NeonAmber
-val RssiWeak = NeonMagenta
-val RssiDead = Color(0xFFB71C1C)
+val RssiStrong = Color(0xFF00C853)
+val RssiMedium = Color(0xFFFFD600)
+val RssiWeak = Color(0xFFFF6D00)
+val RssiDead = Color(0xFFE51C23)
 
 private val DarkColors = darkColorScheme(
     primary = NeonCyan,

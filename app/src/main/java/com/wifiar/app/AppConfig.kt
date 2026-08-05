@@ -22,15 +22,18 @@ object AppConfig {
     /** How high above the floor plane to float dead-zone labels (metres). */
     const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.28f
 
-    /** Raw-sample sphere radius in AR (metres). */
-    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.028f
+    /** Core sample sphere radius in AR (metres) — readable at walk distance. */
+    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.055f
+
+    /** Soft outer glow radius multiplier for sample balls. */
+    const val SAMPLE_GLOW_SCALE: Float = 1.55f
 
     /**
      * Max raw sample spheres drawn in AR at once.
      * Full multi-AP scans can produce thousands of DB rows — rendering all of
-     * them freezes Filament. Spatial downsample keeps the HUD fast.
+     * them freezes Filament. Spatial downsample (one ball per cell) keeps FPS up.
      */
-    const val AR_MAX_SAMPLE_SPHERES: Int = 140
+    const val AR_MAX_SAMPLE_SPHERES: Int = 220
 
     // ── Speed test (Part 6) ──────────────────────────────────────────────────
 
@@ -55,21 +58,21 @@ object AppConfig {
     const val OOKLA_API_KEY: String = ""
 
     /** Download payload size for the HTTP throughput backend (bytes). */
-    const val SPEED_TEST_DOWNLOAD_BYTES: Int = 5_000_000 // ~5 MB
+    const val SPEED_TEST_DOWNLOAD_BYTES: Int = 15_000_000 // ~15 MB — more stable full-rate measure
 
     /** Upload payload size for the HTTP throughput backend (bytes). */
-    const val SPEED_TEST_UPLOAD_BYTES: Int = 2_000_000 // ~2 MB
+    const val SPEED_TEST_UPLOAD_BYTES: Int = 5_000_000 // ~5 MB
 
     /** Number of HTTP RTT samples averaged for ping. */
     const val SPEED_TEST_PING_SAMPLES: Int = 4
 
-    /** Per-phase socket/read timeout (ms). */
-    const val SPEED_TEST_TIMEOUT_MS: Int = 20_000
+    /** Per-phase socket/read timeout (ms) — larger for 15 MB download. */
+    const val SPEED_TEST_TIMEOUT_MS: Int = 45_000
 
     /** AR marker size for speed-test checkpoints. */
-    const val SPEED_TEST_MARKER_RADIUS_M: Float = 0.05f
+    const val SPEED_TEST_MARKER_RADIUS_M: Float = 0.07f
 
-    const val SPEED_TEST_LABEL_HEIGHT_M: Float = 0.28f
+    const val SPEED_TEST_LABEL_HEIGHT_M: Float = 0.32f
 
     // ── Backend sync (Part 7) ────────────────────────────────────────────────
 

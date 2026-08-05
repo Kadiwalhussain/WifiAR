@@ -87,13 +87,13 @@
     <string name="speed_test_running_hint">WiFi scanning continues in the background</string>
     <string name="speed_test_needs_tracking">AR tracking must be stable to run a speed test</string>
     <string name="speed_test_detail_title">Speed test checkpoint</string>
-    <string name="speed_test_detail_down">Download: %1$.1f Mbps</string>
-    <string name="speed_test_detail_up">Upload: %1$.1f Mbps</string>
+    <string name="speed_test_detail_down">Download: %1$s</string>
+    <string name="speed_test_detail_up">Upload: %1$s</string>
     <string name="speed_test_detail_ping">Ping: %1$d ms</string>
     <string name="speed_test_detail_pose">Pose: (%1$.2f, %2$.2f, %3$.2f) m</string>
 
     <string name="speed_test_detail_backend">Backend: %1$s</string>
-    <string name="speed_test_history_title">↓ %1$.1f / ↑ %2$.1f Mbps</string>
+    <string name="speed_test_history_title">↓ %1$s  ·  ↑ %2$s</string>
     <string name="history_speed_tests_header">Speed test checkpoints</string>
     <string name="history_speed_tests_none">No speed tests in this session.</string>
     <string name="history_speed_tests_count">%1$d checkpoint(s)</string>

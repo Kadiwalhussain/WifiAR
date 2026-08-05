@@ -1,6 +1,12 @@
 package com.wifiar.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -24,7 +30,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,7 +53,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -88,6 +92,7 @@ import com.wifiar.app.ui.components.StatusPill
 import com.wifiar.app.ui.theme.NeonCyan
 import com.wifiar.app.ui.theme.NeonMint
 import com.wifiar.app.ui.theme.PanelDark
+import com.wifiar.app.util.SpeedFormat
 import io.github.sceneview.ar.ARSceneView
 import io.github.sceneview.math.Direction
 import io.github.sceneview.math.Position
@@ -342,10 +347,25 @@ fun LiveMappingScreen(
         }
     }
 
-    /** Cap AR spheres so multi-AP walks stay smooth. */
+    /** Cap AR spheres so multi-AP walks stay smooth — one ball per spatial cell. */
     val arDisplaySamples = remember(samples) {
         downsampleSamplesForAr(samples, AppConfig.AR_MAX_SAMPLE_SPHERES)
     }
+    val newestSampleIds = remember(arDisplaySamples) {
+        arDisplaySamples.sortedByDescending { it.timestampMs }.take(10).map { it.id }.toSet()
+    }
+    // Soft pulse for newest balls (shared scale — cheap, looks alive).
+    val ballPulse = rememberInfiniteTransition(label = "ballPulse")
+    val pulseScale by ballPulse.animateFloat(
+        initialValue = 1f,
+        targetValue = 1.28f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "pulseScale",
+    )
+    var lastSpeedBanner by remember { mutableStateOf<String?>(null) }
 
     if (showStartDialog) {
         StartSessionDialog(
@@ -518,27 +538,54 @@ fun LiveMappingScreen(
             }
 
             if (showRaw) {
+                val floorY = heatmapPlane?.floorY
                 arDisplaySamples.forEach { sample ->
                     key(sample.id) {
                         val color = rssiTierColor(sample.rssiDbm)
-                        val material = remember(loader, color) {
+                        val glowColor = color.copy(alpha = 0.35f)
+                        val coreMat = remember(loader, color) {
                             runCatching { loader.createUnlitColorInstance(color) }
                                 .getOrElse {
                                     loader.createColorInstance(
                                         color = color,
-                                        metallic = 0f,
-                                        roughness = 0.55f,
+                                        metallic = 0.05f,
+                                        roughness = 0.35f,
                                     )
                                 }
                         }
+                        val glowMat = remember(loader, glowColor) {
+                            runCatching { loader.createUnlitColorInstance(glowColor) }
+                                .getOrElse {
+                                    loader.createColorInstance(
+                                        color = glowColor,
+                                        metallic = 0f,
+                                        roughness = 0.8f,
+                                    )
+                                }
+                        }
+                        // Exact saved pose (x,y,z). Slight floor lift only if pose Y is
+                        // degenerate so the ball never clips into the floor plane.
+                        val ballY = when {
+                            sample.poseY.isFinite() && sample.poseY != 0f -> sample.poseY
+                            floorY != null -> floorY + 0.35f
+                            else -> 0.4f
+                        }
+                        val isNew = sample.id in newestSampleIds
+                        val coreR = AppConfig.SAMPLE_SPHERE_RADIUS_M *
+                            if (isNew) pulseScale else 1f
+                        val glowR = coreR * AppConfig.SAMPLE_GLOW_SCALE
+                        val pos = Position(x = sample.poseX, y = ballY, z = sample.poseZ)
+                        // Outer glow shell
                         SphereNode(
-                            radius = AppConfig.SAMPLE_SPHERE_RADIUS_M,
-                            position = Position(
-                                x = sample.poseX,
-                                y = sample.poseY,
-                                z = sample.poseZ,
-                            ),
-                            materialInstance = material,
+                            radius = glowR,
+                            position = pos,
+                            materialInstance = glowMat,
+                        )
+                        // Solid core at saved coordinates
+                        SphereNode(
+                            radius = coreR,
+                            position = pos,
+                            materialInstance = coreMat,
                         )
                     }
                 }
@@ -618,12 +665,15 @@ fun LiveMappingScreen(
                         apply = { name = nodeName },
                     )
                     TextNode(
-                        text = "↓%.0f ↑%.0f".format(test.downloadMbps, test.uploadMbps),
-                        fontSize = 20f,
+                        text = SpeedFormat.formatPairCompact(
+                            test.downloadMbps,
+                            test.uploadMbps,
+                        ),
+                        fontSize = 22f,
                         textColor = android.graphics.Color.WHITE,
                         backgroundColor = 0xCC006064.toInt(),
-                        widthMeters = 0.34f,
-                        heightMeters = 0.12f,
+                        widthMeters = 0.55f,
+                        heightMeters = 0.16f,
                         position = Position(
                             x = test.poseX,
                             y = markerY + AppConfig.SPEED_TEST_LABEL_HEIGHT_M * 0.45f,
@@ -703,6 +753,19 @@ fun LiveMappingScreen(
                         .fillMaxWidth()
                         .background(Color(0x99000000), RoundedCornerShape(8.dp))
                         .padding(horizontal = 8.dp, vertical = 5.dp),
+                )
+            }
+            lastSpeedBanner?.let { msg ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = msg,
+                    color = NeonMint,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xCC004D40), RoundedCornerShape(8.dp))
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
                 )
             }
         }
@@ -796,9 +859,25 @@ fun LiveMappingScreen(
                                         result = outcome.result,
                                     )
                                     speedTestError = null
+                                    lastSpeedBanner = SpeedFormat.formatDetailLine(
+                                        outcome.result.downloadMbps,
+                                        outcome.result.uploadMbps,
+                                        outcome.result.pingMs,
+                                    )
+                                    // Auto-clear banner after a few seconds.
+                                    launch {
+                                        delay(8_000)
+                                        if (lastSpeedBanner?.contains(
+                                                SpeedFormat.formatMbps(outcome.result.downloadMbps),
+                                            ) == true
+                                        ) {
+                                            lastSpeedBanner = null
+                                        }
+                                    }
                                 }
                                 is SpeedTestOutcome.Failure -> {
                                     speedTestError = speedTestErrorMessage(outcome.error)
+                                    lastSpeedBanner = null
                                 }
                             }
                         }
@@ -930,31 +1009,33 @@ private data class AnalysisResult(
 )
 
 /**
- * Spatial + strength downsample so AR never draws thousands of spheres.
- * Keeps strongest sample per coarse cell, then caps to [maxPoints].
+ * Spatial downsample so AR never draws thousands of spheres.
+ * One ball per floor cell at the **exact saved pose** of the strongest RSSI
+ * sample in that cell (balls stay where you walked).
  */
 private fun downsampleSamplesForAr(
     samples: List<RssiSampleEntity>,
     maxPoints: Int,
 ): List<RssiSampleEntity> {
-    if (samples.size <= maxPoints) return samples
-    val cell = 0.40f
-    val best = LinkedHashMap<String, RssiSampleEntity>(samples.size.coerceAtMost(512))
+    if (samples.isEmpty()) return emptyList()
+    val cell = 0.28f
+    val best = LinkedHashMap<Long, RssiSampleEntity>(samples.size.coerceAtMost(512))
     for (s in samples) {
-        val key = "${(s.poseX / cell).toInt()}_${(s.poseZ / cell).toInt()}_${s.bssid.takeLast(8)}"
+        val cx = (s.poseX / cell).toInt()
+        val cz = (s.poseZ / cell).toInt()
+        // Pack cell coords into a long key (no BSSID — one visible ball per place).
+        val key = (cx.toLong() shl 32) xor (cz.toLong() and 0xffffffffL)
         val prev = best[key]
-        if (prev == null || s.rssiDbm > prev.rssiDbm) best[key] = s
+        if (prev == null || s.rssiDbm > prev.rssiDbm ||
+            (s.rssiDbm == prev.rssiDbm && s.timestampMs > prev.timestampMs)
+        ) {
+            best[key] = s
+        }
     }
-    val reduced = best.values.toList()
+    val reduced = best.values.sortedBy { it.timestampMs }
     if (reduced.size <= maxPoints) return reduced
-    val step = (reduced.size.toFloat() / maxPoints).coerceAtLeast(1f)
-    val out = ArrayList<RssiSampleEntity>(maxPoints)
-    var i = 0f
-    while (i < reduced.size && out.size < maxPoints) {
-        out.add(reduced[i.toInt()])
-        i += step
-    }
-    return out
+    // Prefer recent walk path when over budget.
+    return reduced.takeLast(maxPoints)
 }
 
 @Composable
@@ -1062,16 +1143,22 @@ private fun SpeedTestDetailDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(
-                    stringResource(
+                    text = stringResource(
                         R.string.speed_test_detail_down,
-                        test.downloadMbps,
+                        SpeedFormat.formatMbps(test.downloadMbps),
                     ),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = NeonMint,
                 )
                 Text(
-                    stringResource(
+                    text = stringResource(
                         R.string.speed_test_detail_up,
-                        test.uploadMbps,
+                        SpeedFormat.formatMbps(test.uploadMbps),
                     ),
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = NeonCyan,
                 )
                 Text(
                     stringResource(
@@ -1242,10 +1329,10 @@ private fun LegendRow() {
     val medium = UserPreferences.rssiMediumDbm
     val dead = UserPreferences.rssiDeadDbm
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        LegendSwatch(Color(0xFF00E676), "≥$strong")
-        LegendSwatch(Color(0xFFFFD740), "$strong…$medium")
-        LegendSwatch(Color(0xFFE040FB), "<$medium")
-        LegendSwatch(Color(0xFF8B0000), "≤$dead")
+        LegendSwatch(Color(0xFF00C853), "≥$strong")
+        LegendSwatch(Color(0xFFFFD600), "$strong…$medium")
+        LegendSwatch(Color(0xFFFF6D00), "<$medium")
+        LegendSwatch(Color(0xFFE51C23), "≤$dead red")
     }
 }
 
@@ -1355,13 +1442,16 @@ private fun ResumeMappingDialog(
     )
 }
 
+/** Green → yellow → orange → red (weak is red). */
 private fun rssiTierColor(rssiDbm: Int): Color {
     val strong = UserPreferences.rssiStrongDbm
     val medium = UserPreferences.rssiMediumDbm
+    val dead = UserPreferences.rssiDeadDbm
     return when {
-        rssiDbm >= strong -> Color(0xFF2E7D32)
-        rssiDbm >= medium -> Color(0xFFF9A825)
-        else -> Color(0xFF6A1B9A)
+        rssiDbm >= strong -> Color(0xFF00C853) // strong green
+        rssiDbm >= medium -> Color(0xFFFFD600) // medium yellow
+        rssiDbm >= dead -> Color(0xFFFF6D00) // weak orange
+        else -> Color(0xFFE51C23) // dead / very weak red
     }
 }
 

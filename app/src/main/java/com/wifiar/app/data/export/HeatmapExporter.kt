@@ -165,13 +165,13 @@ class HeatmapExporter(
         val strong = UserPreferences.rssiStrongDbm
         val medium = UserPreferences.rssiMediumDbm
         val dead = UserPreferences.rssiDeadDbm
-        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#2E7D32"), "≥ $strong (strong)")
+        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#00C853"), "≥ $strong (strong)")
         ly += 36f
-        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#F9A825"), "$strong…$medium")
+        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#FFD600"), "$strong…$medium")
         ly += 36f
-        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#6A1B9A"), "< $medium (weak)")
+        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#FF6D00"), "< $medium (weak)")
         ly += 36f
-        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#8B0000"), "≤ $dead (dead)")
+        drawLegendSwatch(canvas, lx, ly, Color.parseColor("#E51C23"), "≤ $dead (dead/red)")
         ly += 48f
         val notePaint = Paint(bodyPaint).apply { textSize = 16f; color = Color.GRAY }
         canvas.drawText("Top-down (x,z)", lx, ly, notePaint)

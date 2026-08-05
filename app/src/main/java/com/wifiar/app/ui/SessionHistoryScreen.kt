@@ -50,6 +50,7 @@ import com.wifiar.app.data.local.RssiSampleEntity
 import com.wifiar.app.data.local.SessionSummary
 import com.wifiar.app.data.local.SpeedTestEntity
 import com.wifiar.app.data.local.WifiArDatabase
+import com.wifiar.app.util.SpeedFormat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -482,8 +483,8 @@ private fun SpeedTestHistoryCard(test: SpeedTestEntity) {
             Text(
                 text = stringResource(
                     R.string.speed_test_history_title,
-                    test.downloadMbps,
-                    test.uploadMbps,
+                    SpeedFormat.formatMbps(test.downloadMbps),
+                    SpeedFormat.formatMbps(test.uploadMbps),
                 ),
                 fontWeight = FontWeight.SemiBold,
             )
