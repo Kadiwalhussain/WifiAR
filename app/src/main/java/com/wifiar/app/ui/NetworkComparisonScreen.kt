@@ -113,7 +113,7 @@ fun NetworkComparisonScreen(
                 it.bssid == selectedNetwork.key.bssid
             })
         }
-        heatmapPlane?.bitmap?.takeIf { !it.isRecycled && it !== plane?.bitmap }?.recycle()
+        // Do not recycle — Filament may still hold the previous texture.
         heatmapPlane = plane
     }
 

@@ -193,7 +193,8 @@ fun LiveMappingScreen(
 
     var showStartDialog by remember { mutableStateOf(false) }
     var locationName by remember { mutableStateOf("") }
-    var viewMode by rememberSaveable { mutableStateOf(MappingViewMode.BOTH) }
+    // Default HEATMAP only — fewer AR nodes than BOTH (more stable).
+    var viewMode by rememberSaveable { mutableStateOf(MappingViewMode.HEATMAP) }
     var heatmapPlane by remember { mutableStateOf<HeatmapPlane?>(null) }
     var deadZones by remember { mutableStateOf<List<DeadZoneRegion>>(emptyList()) }
     var lastComputeMs by remember { mutableStateOf<Long?>(null) }
@@ -215,60 +216,60 @@ fun LiveMappingScreen(
         }
     }
 
-    // "Best Network Here" — recompute as the user walks (throttled).
-    LaunchedEffect(samples, pose.x, pose.z, tracking.quality) {
+    // "Best Network Here" — rare recompute (heavy on large sample lists).
+    LaunchedEffect(samples.size, tracking.quality) {
         if (samples.isEmpty() || tracking.quality != TrackingQuality.TRACKING) {
             bestNetwork = null
             return@LaunchedEffect
         }
-        val estimate = withContext(Dispatchers.Default) {
-            networkCompareEngine.bestNetworkAt(pose.x, pose.z, samples)
+        while (isActive) {
+            val p = pose
+            val snap = samples
+            if (snap.isEmpty()) {
+                bestNetwork = null
+            } else {
+                bestNetwork = runCatching {
+                    withContext(Dispatchers.Default) {
+                        networkCompareEngine.bestNetworkAt(p.x, p.z, snap)
+                    }
+                }.getOrNull()
+            }
+            delay(1_200L)
         }
-        bestNetwork = estimate
-        // Don't recompute every frame: brief pause so UI stays smooth.
-        delay(350L)
     }
 
 
 
-    // Throttled IDW + dead-zone recompute.
-    LaunchedEffect(samples, viewMode) {
+    // Throttled IDW + dead-zone recompute (crash-safe).
+    LaunchedEffect(samples.size, viewMode) {
         val needsAnalysis =
             viewMode == MappingViewMode.HEATMAP || viewMode == MappingViewMode.BOTH
         if (!needsAnalysis) return@LaunchedEffect
         if (!recomputeGate.shouldRecompute(samples.size)) return@LaunchedEffect
 
         val snapshot = samples.toList()
-        val result = withContext(Dispatchers.Default) {
-            val grid = idw.interpolate(snapshot)
-            if (grid.cols == 0) {
-                AnalysisResult(plane = null, zones = emptyList(), computeMs = 0L)
-            } else {
-                val plane = heatmapBuilder.build(grid, snapshot)
-                val zones = deadZoneDetector.detect(grid)
-                AnalysisResult(plane, zones, grid.computeTimeMs)
+        val result = runCatching {
+            withContext(Dispatchers.Default) {
+                val grid = idw.interpolate(snapshot)
+                if (grid.cols == 0) {
+                    AnalysisResult(plane = null, zones = emptyList(), computeMs = 0L)
+                } else {
+                    val plane = heatmapBuilder.build(grid, snapshot)
+                    val zones = deadZoneDetector.detect(grid)
+                    AnalysisResult(plane, zones, grid.computeTimeMs)
+                }
             }
+        }.getOrElse {
+            AnalysisResult(plane = null, zones = emptyList(), computeMs = 0L)
         }
         if (result.plane != null) {
-            val previous = heatmapPlane
-            // Swap first — never recycle a bitmap still bound to ImageNode (native crash).
+            // Never recycle bitmaps while AR may still use them (native crash).
             heatmapPlane = result.plane
             deadZones = result.zones
             lastComputeMs = result.computeMs
             recomputeGate.markComputed(snapshot.size)
             selectedDeadZone?.let { sel ->
                 if (result.zones.none { it.id == sel.id }) selectedDeadZone = null
-            }
-            if (previous != null && previous.bitmap !== result.plane.bitmap) {
-                scope.launch {
-                    delay(750L)
-                    runCatching {
-                        val stillOld = previous.bitmap
-                        if (!stillOld.isRecycled && stillOld !== heatmapPlane?.bitmap) {
-                            stillOld.recycle()
-                        }
-                    }
-                }
             }
         }
     }
@@ -293,7 +294,6 @@ fun LiveMappingScreen(
     }
 
     suspend fun beginFreshSession(name: String) {
-        val oldPlane = heatmapPlane
         heatmapPlane = null
         deadZones = emptyList()
         selectedDeadZone = null
@@ -301,13 +301,6 @@ fun LiveMappingScreen(
         cloudStatus = null
         lastSpeedBanner = null
         fusionEngine.stop()
-        // Recycle after unbinding from AR scene.
-        if (oldPlane != null) {
-            scope.launch {
-                delay(400L)
-                runCatching { if (!oldPlane.bitmap.isRecycled) oldPlane.bitmap.recycle() }
-            }
-        }
         val session = sessionManager.startSession(name)
         if (session == null) {
             cloudStatus = "Could not start session — try again"
@@ -318,18 +311,11 @@ fun LiveMappingScreen(
     }
 
     suspend fun beginResumedSession(past: MappingSessionEntity) {
-        val oldPlane = heatmapPlane
         heatmapPlane = null
         deadZones = emptyList()
         recomputeGate.reset()
         lastSpeedBanner = null
         fusionEngine.stop()
-        if (oldPlane != null) {
-            scope.launch {
-                delay(400L)
-                runCatching { if (!oldPlane.bitmap.isRecycled) oldPlane.bitmap.recycle() }
-            }
-        }
         val resumed = sessionManager.resumeSession(past.sessionId)
         if (resumed == null) {
             cloudStatus = context.getString(R.string.cloud_resume_failed)
@@ -523,9 +509,10 @@ fun LiveMappingScreen(
             val matRouter = remember(loader) { unlit(Color(0xFFFF6F00)) }
             val matSpeed = remember(loader) { unlit(Color(0xFF00B8D4)) }
 
+            // Ultra-stable AR: spheres only. No PathNode / TextNode (those crash often).
+            // Labels + speed numbers live in the Compose HUD instead.
             if (showSignals) {
-                // 1) Path on floor
-                if (pathPoints.size >= 2) {
+                if (AppConfig.AR_ENABLE_PATH && pathPoints.size >= 2) {
                     key("walk-path") {
                         PathNode(
                             points = pathPoints,
@@ -535,7 +522,6 @@ fun LiveMappingScreen(
                     }
                 }
 
-                // 2) Heatmap
                 if (showHeatmap) {
                     heatmapPlane?.let { plane ->
                         val bmp = plane.bitmap
@@ -549,9 +535,9 @@ fun LiveMappingScreen(
                                 ImageNode(
                                     bitmap = bmp,
                                     size = Size(
-                                        x = plane.widthMeters.coerceIn(0.1f, 40f),
+                                        x = plane.widthMeters.coerceIn(0.1f, 30f),
                                         y = 0.002f,
-                                        z = plane.depthMeters.coerceIn(0.1f, 40f),
+                                        z = plane.depthMeters.coerceIn(0.1f, 30f),
                                     ),
                                     position = Position(
                                         x = plane.centerX.safeCoord(),
@@ -563,7 +549,7 @@ fun LiveMappingScreen(
                             }
                         }
                     }
-                    deadZones.take(3).forEach { zone ->
+                    deadZones.take(2).forEach { zone ->
                         key("dz-${zone.id}") {
                             SphereNode(
                                 radius = AppConfig.DEAD_ZONE_MARKER_RADIUS_M,
@@ -579,7 +565,6 @@ fun LiveMappingScreen(
                     }
                 }
 
-                // 3) Signal balls (RSSI). Yellow = medium strength.
                 if (showRaw) {
                     pathSamples.forEach { sample ->
                         key("b-${sample.id}") {
@@ -589,25 +574,15 @@ fun LiveMappingScreen(
                                 sample.rssiDbm >= UserPreferences.rssiDeadDbm -> matWeak
                                 else -> matDead
                             }
-                            val x = sample.poseX.safeCoord()
-                            val z = sample.poseZ.safeCoord()
-                            val y = ballHeight.safeCoord(1.1f)
                             SphereNode(
                                 radius = AppConfig.SAMPLE_SPHERE_RADIUS_M,
-                                position = Position(x = x, y = y, z = z),
+                                position = Position(
+                                    x = sample.poseX.safeCoord(),
+                                    y = ballHeight.safeCoord(1.0f),
+                                    z = sample.poseZ.safeCoord(),
+                                ),
                                 materialInstance = mat,
                             )
-                            if (sample.id in labeledIds) {
-                                TextNode(
-                                    text = "${sample.rssiDbm} dBm",
-                                    fontSize = 40f,
-                                    textColor = android.graphics.Color.WHITE,
-                                    backgroundColor = 0x99000000.toInt(),
-                                    widthMeters = 0.38f,
-                                    heightMeters = 0.12f,
-                                    position = Position(x = x, y = y + 0.14f, z = z),
-                                )
-                            }
                         }
                     }
                 }
@@ -626,26 +601,18 @@ fun LiveMappingScreen(
                     }
                 }
 
-                // 4) Speed tests — cyan balls with Mbps/kbps (not RSSI)
-                speedTests.take(3).forEach { test ->
+                // Speed: sphere only — Mbps shown in HUD banner after test
+                speedTests.take(2).forEach { test ->
                     key("st-${test.id}") {
-                        val sx = test.poseX.safeCoord()
-                        val sy = test.poseY.safeCoord(ballHeight)
-                        val sz = test.poseZ.safeCoord()
                         SphereNode(
                             radius = AppConfig.SPEED_TEST_MARKER_RADIUS_M,
-                            position = Position(x = sx, y = sy, z = sz),
+                            position = Position(
+                                x = test.poseX.safeCoord(),
+                                y = test.poseY.safeCoord(ballHeight),
+                                z = test.poseZ.safeCoord(),
+                            ),
                             materialInstance = matSpeed,
                             apply = { name = "$SPEED_TEST_NODE_PREFIX${test.id}" },
-                        )
-                        TextNode(
-                            text = "↓ ${SpeedFormat.formatMbps(test.downloadMbps)}\n↑ ${SpeedFormat.formatMbps(test.uploadMbps)}",
-                            fontSize = 34f,
-                            textColor = android.graphics.Color.WHITE,
-                            backgroundColor = 0xDD006064.toInt(),
-                            widthMeters = 0.44f,
-                            heightMeters = 0.22f,
-                            position = Position(x = sx, y = sy + 0.18f, z = sz),
                         )
                     }
                 }

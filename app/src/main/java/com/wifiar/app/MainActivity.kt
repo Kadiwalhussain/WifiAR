@@ -4,11 +4,6 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.getValue
@@ -33,18 +28,11 @@ class MainActivity : ComponentActivity() {
                     var showOnboarding by remember {
                         mutableStateOf(!UserPreferences.onboardingDone)
                     }
-                    AnimatedContent(
-                        targetState = showOnboarding,
-                        transitionSpec = {
-                            (fadeIn() + scaleIn(initialScale = 0.98f)) togetherWith fadeOut()
-                        },
-                        label = "rootGate",
-                    ) { onboarding ->
-                        if (onboarding) {
-                            OnboardingScreen(onFinished = { showOnboarding = false })
-                        } else {
-                            AppShell()
-                        }
+                    // No AnimatedContent — avoids races when switching into AR.
+                    if (showOnboarding) {
+                        OnboardingScreen(onFinished = { showOnboarding = false })
+                    } else {
+                        AppShell()
                     }
                 }
             }

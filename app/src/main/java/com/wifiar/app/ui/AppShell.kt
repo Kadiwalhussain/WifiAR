@@ -1,11 +1,5 @@
 package com.wifiar.app.ui
 
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -58,7 +52,10 @@ enum class AppTab {
 }
 
 /**
- * Compact bottom nav with Material icons and animated tab content.
+ * Bottom nav shell.
+ *
+ * Important: **no AnimatedContent** around AR — sliding tab transitions
+ * destroy [ARSceneView] mid-frame and cause native Filament/ARCore crashes.
  */
 @Composable
 fun AppShell(
@@ -119,19 +116,12 @@ fun AppShell(
             }
         },
     ) { innerPadding ->
-        AnimatedContent(
-            targetState = tab,
-            transitionSpec = {
-                val dir = if (targetState.ordinal >= initialState.ordinal) 1 else -1
-                (slideInHorizontally { it / 12 * dir } + fadeIn()) togetherWith
-                    (slideOutHorizontally { -it / 12 * dir } + fadeOut())
-            },
-            label = "tabContent",
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(bottom = innerPadding.calculateBottomPadding()),
-        ) { current ->
-            when (current) {
+        ) {
+            when (tab) {
                 AppTab.LIVE_MAPPING -> {
                     PermissionGate {
                         LiveMappingScreen(modifier = Modifier.fillMaxSize())

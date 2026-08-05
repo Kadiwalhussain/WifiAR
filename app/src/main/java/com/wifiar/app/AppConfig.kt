@@ -22,26 +22,29 @@ object AppConfig {
     /** How high above the floor plane to float dead-zone labels (metres). */
     const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.28f
 
-    /**
-     * Floating RSSI ball radius (metres).
-     * Smaller = less GPU fill + fewer crashes on mid-range phones.
-     */
-    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.09f
+    /** RSSI ball radius (metres). */
+    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.08f
 
     /**
-     * Hard cap on AR sample spheres.
-     * Each ball is expensive; keep this low for smooth 30–60 fps.
+     * Hard cap on AR sample spheres — keep very low to avoid Filament OOM/crashes.
+     * PathNode / TextNode are disabled in Live Mapping for the same reason.
      */
-    const val AR_MAX_SAMPLE_SPHERES: Int = 20
+    const val AR_MAX_SAMPLE_SPHERES: Int = 12
 
-    /** Max RSSI text labels (bitmap textures are the #1 lag source). */
-    const val AR_MAX_RSSI_LABELS: Int = 6
+    /** Max RSSI labels in AR (0 = labels only in HUD — safest). */
+    const val AR_MAX_RSSI_LABELS: Int = 0
 
-    /** Max walk-path polyline vertices. */
-    const val AR_MAX_PATH_POINTS: Int = 28
+    /** Max walk-path points (path drawing is optional / off by default for stability). */
+    const val AR_MAX_PATH_POINTS: Int = 0
 
     /** How high above estimated floor to float signal balls (metres). */
-    const val AR_BALL_HEIGHT_ABOVE_FLOOR_M: Float = 1.05f
+    const val AR_BALL_HEIGHT_ABOVE_FLOOR_M: Float = 1.0f
+
+    /** Draw floor path polyline (can crash some GPUs — keep false for stability). */
+    const val AR_ENABLE_PATH: Boolean = false
+
+    /** Draw AR TextNode labels (bitmap textures — heavy/crashy; keep false). */
+    const val AR_ENABLE_TEXT_LABELS: Boolean = false
 
     // ── Speed test (Part 6) ──────────────────────────────────────────────────
 

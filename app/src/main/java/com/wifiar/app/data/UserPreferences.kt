@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 import com.wifiar.app.AppConfig
 
 /**
- * User-tunable settings (Part 10). Initialized from [com.wifiar.app.WifiArApp].
+ * User-tunable settings. Safe defaults if [init] was not called yet (never crash).
  */
 object UserPreferences {
 
@@ -23,36 +23,48 @@ object UserPreferences {
 
     fun init(context: Context) {
         if (prefs == null) {
-            prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            synchronized(this) {
+                if (prefs == null) {
+                    prefs = context.applicationContext
+                        .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                }
+            }
         }
     }
 
-    private fun p(): SharedPreferences =
-        prefs ?: error("UserPreferences.init() not called")
+    private fun p(): SharedPreferences? = prefs
 
     var onboardingDone: Boolean
-        get() = p().getBoolean(KEY_ONBOARDING, false)
-        set(v) = p().edit().putBoolean(KEY_ONBOARDING, v).apply()
+        get() = p()?.getBoolean(KEY_ONBOARDING, false) ?: false
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_ONBOARDING, v)?.apply()
+        }
 
-    /** Green threshold (dBm) — RSSI ≥ this is strong. Default −50. */
     var rssiStrongDbm: Int
-        get() = p().getInt(KEY_STRONG, -50)
-        set(v) = p().edit().putInt(KEY_STRONG, v).apply()
+        get() = p()?.getInt(KEY_STRONG, -50) ?: -50
+        set(v) {
+            p()?.edit()?.putInt(KEY_STRONG, v)?.apply()
+        }
 
-    /** Yellow threshold (dBm) — between strong and this is medium. Default −70. */
     var rssiMediumDbm: Int
-        get() = p().getInt(KEY_MEDIUM, AppConfig.COVERAGE_THRESHOLD_DBM)
-        set(v) = p().edit().putInt(KEY_MEDIUM, v).apply()
+        get() = p()?.getInt(KEY_MEDIUM, AppConfig.COVERAGE_THRESHOLD_DBM)
+            ?: AppConfig.COVERAGE_THRESHOLD_DBM
+        set(v) {
+            p()?.edit()?.putInt(KEY_MEDIUM, v)?.apply()
+        }
 
-    /** Dead-zone threshold (dBm). Default −80. */
     var rssiDeadDbm: Int
-        get() = p().getInt(KEY_DEAD, AppConfig.DEAD_ZONE_THRESHOLD_DBM)
-        set(v) = p().edit().putInt(KEY_DEAD, v).apply()
+        get() = p()?.getInt(KEY_DEAD, AppConfig.DEAD_ZONE_THRESHOLD_DBM)
+            ?: AppConfig.DEAD_ZONE_THRESHOLD_DBM
+        set(v) {
+            p()?.edit()?.putInt(KEY_DEAD, v)?.apply()
+        }
 
-    /** True = indoor n=3.0, false = open n=2.0. */
     var pathLossIndoor: Boolean
-        get() = p().getBoolean(KEY_PATH_LOSS_INDOOR, true)
-        set(v) = p().edit().putBoolean(KEY_PATH_LOSS_INDOOR, v).apply()
+        get() = p()?.getBoolean(KEY_PATH_LOSS_INDOOR, true) ?: true
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_PATH_LOSS_INDOOR, v)?.apply()
+        }
 
     val pathLossExponent: Float
         get() = if (pathLossIndoor) {
@@ -61,13 +73,15 @@ object UserPreferences {
             AppConfig.PATH_LOSS_EXPONENT_OPEN
         }
 
-    /** IDW / heatmap grid cell size in metres. */
     var gridCellSizeM: Float
-        get() = p().getFloat(KEY_GRID_CELL, 0.3f)
-        set(v) = p().edit().putFloat(KEY_GRID_CELL, v.coerceIn(0.15f, 1.0f)).apply()
+        get() = p()?.getFloat(KEY_GRID_CELL, 0.3f) ?: 0.3f
+        set(v) {
+            p()?.edit()?.putFloat(KEY_GRID_CELL, v.coerceIn(0.15f, 1.0f))?.apply()
+        }
 
-    /** User acknowledged Cloud Anchors API key setup. */
     var cloudApiAcknowledged: Boolean
-        get() = p().getBoolean(KEY_CLOUD_API_CONFIGURED, false)
-        set(v) = p().edit().putBoolean(KEY_CLOUD_API_CONFIGURED, v).apply()
+        get() = p()?.getBoolean(KEY_CLOUD_API_CONFIGURED, false) ?: false
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_CLOUD_API_CONFIGURED, v)?.apply()
+        }
 }
