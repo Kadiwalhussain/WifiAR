@@ -91,7 +91,6 @@ import io.github.sceneview.ar.ARSceneView
 import io.github.sceneview.math.Direction
 import io.github.sceneview.math.Position
 import io.github.sceneview.math.Size
-import io.github.sceneview.node.SphereNode
 import io.github.sceneview.rememberOnGestureListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -100,6 +99,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlin.math.abs
+import kotlin.math.hypot
 
 
 /** Visualization mode for Live Mapping. */
@@ -483,16 +484,50 @@ fun LiveMappingScreen(
             }.getOrElse {
                 loader.createColorInstance(color = color, metallic = 0f, roughness = 0.45f)
             }
-            val matStrong = remember(loader) { unlit(Color(0xFF00C853)) }
-            val matMedium = remember(loader) { unlit(Color(0xFFFFD600)) }
-            val matWeak = remember(loader) { unlit(Color(0xFFFF6D00)) }
-            val matDead = remember(loader) { unlit(Color(0xFFE51C23)) }
+            val matStrong = remember(loader) { unlit(Color(0xFF9CCC65)) } // soft lime like demos
+            val matMedium = remember(loader) { unlit(Color(0xFFFFD54F)) }
+            val matWeak = remember(loader) { unlit(Color(0xFFFF8A65)) }
+            val matDead = remember(loader) { unlit(Color(0xFFE53935)) }
+            val matPath = remember(loader) { unlit(Color(0xFF00E5C3)) } // cyan trail
+            val matStem = remember(loader) { unlit(Color(0x99FFFFFF)) }
             val matRouter = remember(loader) { unlit(Color(0xFFFF6F00)) }
             val matSpeed = remember(loader) { unlit(Color(0xFF00E5FF)) }
+            val matFloorDot = remember(loader) { unlit(Color(0x5500E5C3)) }
+
+            val pathFloorY = when {
+                floorY.isFinite() -> floorY + 0.02f
+                else -> 0.02f
+            }
+            // Sort once for trail + stems (oldest → newest).
+            val pathSamples = remember(arDisplaySamples) {
+                arDisplaySamples
+                    .filter {
+                        it.poseX.isFinite() && it.poseZ.isFinite() &&
+                            abs(it.poseX) < 200f && abs(it.poseZ) < 200f
+                    }
+                    .sortedBy { it.timestampMs }
+                    .takeLast(AppConfig.AR_MAX_PATH_POINTS)
+            }
+            val pathPoints = remember(pathSamples, pathFloorY) {
+                buildWalkPathPoints(pathSamples, pathFloorY)
+            }
+            val labeledIds = remember(pathSamples) {
+                pathSamples.takeLast(AppConfig.AR_MAX_RSSI_LABELS).map { it.id }.toSet()
+            }
+
+            // ── Cyan walk path on the floor (demo-style) ──────────────────────
+            if (pathPoints.size >= 2 && (showRaw || showHeatmap)) {
+                key("walk-path-${pathPoints.size}") {
+                    PathNode(
+                        points = pathPoints,
+                        closed = false,
+                        materialInstance = matPath,
+                    )
+                }
+            }
 
             if (showHeatmap) {
                 heatmapPlane?.let { plane ->
-                    // Never upload a recycled bitmap — Filament native-crashes.
                     val bmp = plane.bitmap
                     if (!bmp.isRecycled &&
                         plane.widthMeters.isFinite() &&
@@ -519,11 +554,9 @@ fun LiveMappingScreen(
                     }
                 }
 
-                // Dead-zone markers only (no TextNode spam — text textures are heavy).
                 deadZones.take(6).forEach { zone ->
                     key("dz-${zone.id}") {
-                        val markerY = (floorY + AppConfig.DEAD_ZONE_LABEL_HEIGHT_M).safeCoord()
-                        val nodeName = "$DEAD_ZONE_NODE_PREFIX${zone.id}"
+                        val markerY = (pathFloorY + AppConfig.DEAD_ZONE_LABEL_HEIGHT_M).safeCoord()
                         SphereNode(
                             radius = AppConfig.DEAD_ZONE_MARKER_RADIUS_M,
                             position = Position(
@@ -532,42 +565,70 @@ fun LiveMappingScreen(
                                 z = zone.centroidZ.safeCoord(),
                             ),
                             materialInstance = matDead,
-                            apply = { name = nodeName },
+                            apply = { name = "$DEAD_ZONE_NODE_PREFIX${zone.id}" },
                         )
                     }
                 }
             }
 
+            // ── Floating RSSI balls + stems + labels (like the reference demo) ─
             if (showRaw) {
-                val fallbackY = if (floorY.isFinite()) floorY + 0.35f else 0.4f
-                arDisplaySamples.forEach { sample ->
-                    // Stable key by cell pose bucket — fewer node churn than raw DB ids.
-                    key("s-${sample.id}") {
+                val fallbackBallY = pathFloorY + 1.15f
+                pathSamples.forEach { sample ->
+                    key("ball-${sample.id}") {
                         val mat = when {
                             sample.rssiDbm >= UserPreferences.rssiStrongDbm -> matStrong
                             sample.rssiDbm >= UserPreferences.rssiMediumDbm -> matMedium
                             sample.rssiDbm >= UserPreferences.rssiDeadDbm -> matWeak
                             else -> matDead
                         }
+                        val x = sample.poseX.safeCoord()
+                        val z = sample.poseZ.safeCoord()
+                        // Prefer measured device height so balls float in the air.
                         val ballY = when {
-                            sample.poseY.isFinite() && kotlin.math.abs(sample.poseY) > 1e-4f ->
-                                sample.poseY
-                            else -> fallbackY
+                            sample.poseY.isFinite() && abs(sample.poseY) > 0.05f ->
+                                sample.poseY.safeCoord(fallbackBallY)
+                            else -> fallbackBallY
                         }
+                        val r = AppConfig.SAMPLE_SPHERE_RADIUS_M
+
+                        // Floor anchor dot
                         SphereNode(
-                            radius = AppConfig.SAMPLE_SPHERE_RADIUS_M,
-                            position = Position(
-                                x = sample.poseX.safeCoord(),
-                                y = ballY.safeCoord(),
-                                z = sample.poseZ.safeCoord(),
-                            ),
+                            radius = r * 0.22f,
+                            position = Position(x = x, y = pathFloorY, z = z),
+                            materialInstance = matFloorDot,
+                        )
+
+                        // Vertical stem (floor → ball) — demo dashed-line feel via thin line
+                        LineNode(
+                            start = Position(x = x, y = pathFloorY, z = z),
+                            end = Position(x = x, y = (ballY - r * 0.85f).safeCoord(pathFloorY + 0.2f), z = z),
+                            materialInstance = matStem,
+                        )
+
+                        // Main signal ball
+                        SphereNode(
+                            radius = r,
+                            position = Position(x = x, y = ballY, z = z),
                             materialInstance = mat,
                         )
+
+                        // RSSI number on / above the ball (capped — textures are heavy)
+                        if (sample.id in labeledIds) {
+                            TextNode(
+                                text = "${sample.rssiDbm}",
+                                fontSize = 52f,
+                                textColor = android.graphics.Color.WHITE,
+                                backgroundColor = 0x00000000,
+                                widthMeters = 0.28f,
+                                heightMeters = 0.14f,
+                                position = Position(x = x, y = ballY + 0.02f, z = z),
+                            )
+                        }
                     }
                 }
             }
 
-            // #1 recommended router placement.
             RecommendationCache.topPosition?.let { rec ->
                 key("router-rec-live") {
                     SphereNode(
@@ -582,19 +643,28 @@ fun LiveMappingScreen(
                 }
             }
 
-            // Speed-test checkpoints (sphere only; tap opens full Mbps dialog).
-            speedTests.take(12).forEach { test ->
+            speedTests.take(10).forEach { test ->
                 key("st-${test.id}") {
-                    val nodeName = "$SPEED_TEST_NODE_PREFIX${test.id}"
+                    val sx = test.poseX.safeCoord()
+                    val sy = test.poseY.safeCoord(0.9f)
+                    val sz = test.poseZ.safeCoord()
                     SphereNode(
                         radius = AppConfig.SPEED_TEST_MARKER_RADIUS_M,
-                        position = Position(
-                            x = test.poseX.safeCoord(),
-                            y = test.poseY.safeCoord(fallback = 0.5f),
-                            z = test.poseZ.safeCoord(),
-                        ),
+                        position = Position(x = sx, y = sy, z = sz),
                         materialInstance = matSpeed,
-                        apply = { name = nodeName },
+                        apply = { name = "$SPEED_TEST_NODE_PREFIX${test.id}" },
+                    )
+                    TextNode(
+                        text = SpeedFormat.formatPairCompact(
+                            test.downloadMbps,
+                            test.uploadMbps,
+                        ),
+                        fontSize = 36f,
+                        textColor = android.graphics.Color.WHITE,
+                        backgroundColor = 0xCC006064.toInt(),
+                        widthMeters = 0.48f,
+                        heightMeters = 0.14f,
+                        position = Position(x = sx, y = sy + 0.16f, z = sz),
                     )
                 }
             }
@@ -933,12 +1003,12 @@ private fun downsampleSamplesForAr(
     maxPoints: Int,
 ): List<RssiSampleEntity> {
     if (samples.isEmpty()) return emptyList()
-    val cell = 0.28f
+    val cell = 0.35f
     val best = LinkedHashMap<Long, RssiSampleEntity>(samples.size.coerceAtMost(512))
     for (s in samples) {
+        if (!s.poseX.isFinite() || !s.poseZ.isFinite()) continue
         val cx = (s.poseX / cell).toInt()
         val cz = (s.poseZ / cell).toInt()
-        // Pack cell coords into a long key (no BSSID — one visible ball per place).
         val key = (cx.toLong() shl 32) xor (cz.toLong() and 0xffffffffL)
         val prev = best[key]
         if (prev == null || s.rssiDbm > prev.rssiDbm ||
@@ -949,8 +1019,33 @@ private fun downsampleSamplesForAr(
     }
     val reduced = best.values.sortedBy { it.timestampMs }
     if (reduced.size <= maxPoints) return reduced
-    // Prefer recent walk path when over budget.
     return reduced.takeLast(maxPoints)
+}
+
+/**
+ * Build a smooth-ish walk polyline on the floor, dropping tiny jitter segments.
+ */
+private fun buildWalkPathPoints(
+    samples: List<RssiSampleEntity>,
+    floorY: Float,
+): List<Position> {
+    if (samples.isEmpty()) return emptyList()
+    val out = ArrayList<Position>(samples.size)
+    var lastX = Float.NaN
+    var lastZ = Float.NaN
+    val minStep = 0.08f // metres — ignore micro jitter
+    for (s in samples) {
+        val x = s.poseX.safeCoord()
+        val z = s.poseZ.safeCoord()
+        if (lastX.isFinite()) {
+            val d = hypot((x - lastX).toDouble(), (z - lastZ).toDouble()).toFloat()
+            if (d < minStep) continue
+        }
+        out.add(Position(x = x, y = floorY, z = z))
+        lastX = x
+        lastZ = z
+    }
+    return out
 }
 
 @Composable

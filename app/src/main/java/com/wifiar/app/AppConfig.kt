@@ -22,14 +22,26 @@ object AppConfig {
     /** How high above the floor plane to float dead-zone labels (metres). */
     const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.28f
 
-    /** Core sample sphere radius in AR (metres). */
-    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.05f
+    /**
+     * Floating RSSI ball radius (metres) — large enough to read like demo apps.
+     * (~12 cm diameter feels solid in a room-scale walk).
+     */
+    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.12f
 
     /**
-     * Max sample spheres in AR. Keep modest — Filament OOM/crashes if hundreds of
-     * nodes + materials are created/destroyed every frame.
+     * Max floating sample spheres in AR.
+     * Labels are capped separately — keep total Filament nodes under control.
      */
-    const val AR_MAX_SAMPLE_SPHERES: Int = 80
+    const val AR_MAX_SAMPLE_SPHERES: Int = 48
+
+    /** Max billboard RSSI labels (textures are heavier than spheres). */
+    const val AR_MAX_RSSI_LABELS: Int = 18
+
+    /** Max path polyline points for the cyan walk trail. */
+    const val AR_MAX_PATH_POINTS: Int = 64
+
+    /** Vertical stem thickness (metres). */
+    const val AR_STEM_RADIUS_M: Float = 0.008f
 
     // ── Speed test (Part 6) ──────────────────────────────────────────────────
 
