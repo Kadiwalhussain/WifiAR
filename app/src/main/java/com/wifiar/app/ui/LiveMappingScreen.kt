@@ -1,12 +1,6 @@
 package com.wifiar.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -255,16 +249,25 @@ fun LiveMappingScreen(
             }
         }
         if (result.plane != null) {
-            heatmapPlane?.bitmap?.takeIf {
-                it !== result.plane.bitmap && !it.isRecycled
-            }?.recycle()
+            val previous = heatmapPlane
+            // Swap first — never recycle a bitmap still bound to ImageNode (native crash).
             heatmapPlane = result.plane
             deadZones = result.zones
             lastComputeMs = result.computeMs
             recomputeGate.markComputed(snapshot.size)
-            // Drop selection if the zone disappeared.
             selectedDeadZone?.let { sel ->
                 if (result.zones.none { it.id == sel.id }) selectedDeadZone = null
+            }
+            if (previous != null && previous.bitmap !== result.plane.bitmap) {
+                scope.launch {
+                    delay(750L)
+                    runCatching {
+                        val stillOld = previous.bitmap
+                        if (!stillOld.isRecycled && stillOld !== heatmapPlane?.bitmap) {
+                            stillOld.recycle()
+                        }
+                    }
+                }
             }
         }
     }
@@ -281,16 +284,29 @@ fun LiveMappingScreen(
         }
     }
 
+    var lastSpeedBanner by remember { mutableStateOf<String?>(null) }
+
+    /** Cap AR spheres — one ball per spatial cell, stable node count. */
+    val arDisplaySamples = remember(samples) {
+        downsampleSamplesForAr(samples, AppConfig.AR_MAX_SAMPLE_SPHERES)
+    }
+
     suspend fun beginFreshSession(name: String) {
-        runCatching {
-            heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
-        }
+        val oldPlane = heatmapPlane
         heatmapPlane = null
         deadZones = emptyList()
         selectedDeadZone = null
         recomputeGate.reset()
         cloudStatus = null
+        lastSpeedBanner = null
         fusionEngine.stop()
+        // Recycle after unbinding from AR scene.
+        if (oldPlane != null) {
+            scope.launch {
+                delay(400L)
+                runCatching { if (!oldPlane.bitmap.isRecycled) oldPlane.bitmap.recycle() }
+            }
+        }
         val session = sessionManager.startSession(name)
         if (session == null) {
             cloudStatus = "Could not start session — try again"
@@ -301,13 +317,18 @@ fun LiveMappingScreen(
     }
 
     suspend fun beginResumedSession(past: MappingSessionEntity) {
-        runCatching {
-            heatmapPlane?.bitmap?.takeIf { !it.isRecycled }?.recycle()
-        }
+        val oldPlane = heatmapPlane
         heatmapPlane = null
         deadZones = emptyList()
         recomputeGate.reset()
+        lastSpeedBanner = null
         fusionEngine.stop()
+        if (oldPlane != null) {
+            scope.launch {
+                delay(400L)
+                runCatching { if (!oldPlane.bitmap.isRecycled) oldPlane.bitmap.recycle() }
+            }
+        }
         val resumed = sessionManager.resumeSession(past.sessionId)
         if (resumed == null) {
             cloudStatus = context.getString(R.string.cloud_resume_failed)
@@ -320,9 +341,11 @@ fun LiveMappingScreen(
         val sess = arSession
         if (!cloudId.isNullOrBlank() && sess != null && cloudAnchors.isApiKeyConfigured()) {
             cloudStatus = context.getString(R.string.cloud_resolving)
-            val result = withTimeoutOrNull(AppConfig.CLOUD_ANCHOR_TIMEOUT_SEC * 1_000) {
-                cloudAnchors.resolve(sess, cloudId)
-            }
+            val result = runCatching {
+                withTimeoutOrNull(AppConfig.CLOUD_ANCHOR_TIMEOUT_SEC * 1_000) {
+                    cloudAnchors.resolve(sess, cloudId)
+                }
+            }.getOrNull()
             when (result) {
                 is CloudAnchorManager.ResolveResult.Success -> {
                     arSessionManager.resetOrigin()
@@ -346,26 +369,6 @@ fun LiveMappingScreen(
             cloudStatus = context.getString(R.string.cloud_resume_local_only)
         }
     }
-
-    /** Cap AR spheres so multi-AP walks stay smooth — one ball per spatial cell. */
-    val arDisplaySamples = remember(samples) {
-        downsampleSamplesForAr(samples, AppConfig.AR_MAX_SAMPLE_SPHERES)
-    }
-    val newestSampleIds = remember(arDisplaySamples) {
-        arDisplaySamples.sortedByDescending { it.timestampMs }.take(10).map { it.id }.toSet()
-    }
-    // Soft pulse for newest balls (shared scale — cheap, looks alive).
-    val ballPulse = rememberInfiniteTransition(label = "ballPulse")
-    val pulseScale by ballPulse.animateFloat(
-        initialValue = 1f,
-        targetValue = 1.28f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "pulseScale",
-    )
-    var lastSpeedBanner by remember { mutableStateOf<String?>(null) }
 
     if (showStartDialog) {
         StartSessionDialog(
@@ -462,30 +465,53 @@ fun LiveMappingScreen(
             },
             onSessionPaused = { arSessionManager.onSessionPaused() },
             onSessionFailed = { arSessionManager.onSessionFailed(it) },
-            onSessionUpdated = { _, frame -> arSessionManager.onFrame(frame) },
-            onTrackingFailureChanged = { arSessionManager.onTrackingFailureChanged(it) },
+            onSessionUpdated = { _, frame ->
+                runCatching { arSessionManager.onFrame(frame) }
+            },
+            onTrackingFailureChanged = {
+                runCatching { arSessionManager.onTrackingFailureChanged(it) }
+            },
             onGestureListener = gestureListener,
         ) {
 
             val loader = materialLoader
             val floorY = heatmapPlane?.floorY ?: 0f
 
+            // Shared materials (few instances) — avoid per-sample material thrash / OOM.
+            fun unlit(color: Color) = runCatching {
+                loader.createUnlitColorInstance(color)
+            }.getOrElse {
+                loader.createColorInstance(color = color, metallic = 0f, roughness = 0.45f)
+            }
+            val matStrong = remember(loader) { unlit(Color(0xFF00C853)) }
+            val matMedium = remember(loader) { unlit(Color(0xFFFFD600)) }
+            val matWeak = remember(loader) { unlit(Color(0xFFFF6D00)) }
+            val matDead = remember(loader) { unlit(Color(0xFFE51C23)) }
+            val matRouter = remember(loader) { unlit(Color(0xFFFF6F00)) }
+            val matSpeed = remember(loader) { unlit(Color(0xFF00E5FF)) }
+
             if (showHeatmap) {
                 heatmapPlane?.let { plane ->
-                    // Never upload a recycled bitmap — Filament can native-crash.
-                    if (!plane.bitmap.isRecycled) {
+                    // Never upload a recycled bitmap — Filament native-crashes.
+                    val bmp = plane.bitmap
+                    if (!bmp.isRecycled &&
+                        plane.widthMeters.isFinite() &&
+                        plane.depthMeters.isFinite() &&
+                        plane.widthMeters > 0f &&
+                        plane.depthMeters > 0f
+                    ) {
                         key(plane.version) {
                             ImageNode(
-                                bitmap = plane.bitmap,
+                                bitmap = bmp,
                                 size = Size(
-                                    x = plane.widthMeters,
+                                    x = plane.widthMeters.coerceIn(0.05f, 80f),
                                     y = 0.002f,
-                                    z = plane.depthMeters,
+                                    z = plane.depthMeters.coerceIn(0.05f, 80f),
                                 ),
                                 position = Position(
-                                    x = plane.centerX,
-                                    y = plane.floorY,
-                                    z = plane.centerZ,
+                                    x = plane.centerX.safeCoord(),
+                                    y = plane.floorY.safeCoord(),
+                                    z = plane.centerZ.safeCoord(),
                                 ),
                                 normal = Direction(y = 1.0f),
                             )
@@ -493,44 +519,19 @@ fun LiveMappingScreen(
                     }
                 }
 
-                // Dead-zone markers: compact red spheres + labels.
-                deadZones.take(12).forEach { zone ->
-                    key(zone.id) {
-                        val markerY = floorY + AppConfig.DEAD_ZONE_LABEL_HEIGHT_M
+                // Dead-zone markers only (no TextNode spam — text textures are heavy).
+                deadZones.take(6).forEach { zone ->
+                    key("dz-${zone.id}") {
+                        val markerY = (floorY + AppConfig.DEAD_ZONE_LABEL_HEIGHT_M).safeCoord()
                         val nodeName = "$DEAD_ZONE_NODE_PREFIX${zone.id}"
-                        val redMaterial = remember(loader) {
-                            runCatching {
-                                loader.createUnlitColorInstance(Color(0xFFB71C1C))
-                            }.getOrElse {
-                                loader.createColorInstance(
-                                    color = Color(0xFFB71C1C),
-                                    metallic = 0f,
-                                    roughness = 0.5f,
-                                )
-                            }
-                        }
                         SphereNode(
                             radius = AppConfig.DEAD_ZONE_MARKER_RADIUS_M,
                             position = Position(
-                                x = zone.centroidX,
+                                x = zone.centroidX.safeCoord(),
                                 y = markerY,
-                                z = zone.centroidZ,
+                                z = zone.centroidZ.safeCoord(),
                             ),
-                            materialInstance = redMaterial,
-                            apply = { name = nodeName },
-                        )
-                        TextNode(
-                            text = "DZ %.0f".format(zone.worstRssiDbm),
-                            fontSize = 22f,
-                            textColor = android.graphics.Color.WHITE,
-                            backgroundColor = 0xCCB71C1C.toInt(),
-                            widthMeters = 0.32f,
-                            heightMeters = 0.14f,
-                            position = Position(
-                                x = zone.centroidX,
-                                y = markerY + 0.12f,
-                                z = zone.centroidZ,
-                            ),
+                            materialInstance = matDead,
                             apply = { name = nodeName },
                         )
                     }
@@ -538,147 +539,61 @@ fun LiveMappingScreen(
             }
 
             if (showRaw) {
-                val floorY = heatmapPlane?.floorY
+                val fallbackY = if (floorY.isFinite()) floorY + 0.35f else 0.4f
                 arDisplaySamples.forEach { sample ->
-                    key(sample.id) {
-                        val color = rssiTierColor(sample.rssiDbm)
-                        val glowColor = color.copy(alpha = 0.35f)
-                        val coreMat = remember(loader, color) {
-                            runCatching { loader.createUnlitColorInstance(color) }
-                                .getOrElse {
-                                    loader.createColorInstance(
-                                        color = color,
-                                        metallic = 0.05f,
-                                        roughness = 0.35f,
-                                    )
-                                }
+                    // Stable key by cell pose bucket — fewer node churn than raw DB ids.
+                    key("s-${sample.id}") {
+                        val mat = when {
+                            sample.rssiDbm >= UserPreferences.rssiStrongDbm -> matStrong
+                            sample.rssiDbm >= UserPreferences.rssiMediumDbm -> matMedium
+                            sample.rssiDbm >= UserPreferences.rssiDeadDbm -> matWeak
+                            else -> matDead
                         }
-                        val glowMat = remember(loader, glowColor) {
-                            runCatching { loader.createUnlitColorInstance(glowColor) }
-                                .getOrElse {
-                                    loader.createColorInstance(
-                                        color = glowColor,
-                                        metallic = 0f,
-                                        roughness = 0.8f,
-                                    )
-                                }
-                        }
-                        // Exact saved pose (x,y,z). Slight floor lift only if pose Y is
-                        // degenerate so the ball never clips into the floor plane.
                         val ballY = when {
-                            sample.poseY.isFinite() && sample.poseY != 0f -> sample.poseY
-                            floorY != null -> floorY + 0.35f
-                            else -> 0.4f
+                            sample.poseY.isFinite() && kotlin.math.abs(sample.poseY) > 1e-4f ->
+                                sample.poseY
+                            else -> fallbackY
                         }
-                        val isNew = sample.id in newestSampleIds
-                        val coreR = AppConfig.SAMPLE_SPHERE_RADIUS_M *
-                            if (isNew) pulseScale else 1f
-                        val glowR = coreR * AppConfig.SAMPLE_GLOW_SCALE
-                        val pos = Position(x = sample.poseX, y = ballY, z = sample.poseZ)
-                        // Outer glow shell
                         SphereNode(
-                            radius = glowR,
-                            position = pos,
-                            materialInstance = glowMat,
-                        )
-                        // Solid core at saved coordinates
-                        SphereNode(
-                            radius = coreR,
-                            position = pos,
-                            materialInstance = coreMat,
+                            radius = AppConfig.SAMPLE_SPHERE_RADIUS_M,
+                            position = Position(
+                                x = sample.poseX.safeCoord(),
+                                y = ballY.safeCoord(),
+                                z = sample.poseZ.safeCoord(),
+                            ),
+                            materialInstance = mat,
                         )
                     }
                 }
             }
 
-            // #1 recommended router placement (from Part 9 recommender cache).
+            // #1 recommended router placement.
             RecommendationCache.topPosition?.let { rec ->
                 key("router-rec-live") {
-                    val glow = remember(loader) {
-                        runCatching {
-                            loader.createUnlitColorInstance(Color(0xFFFFD54F))
-                        }.getOrElse {
-                            loader.createColorInstance(
-                                color = Color(0xFFFFD54F),
-                                metallic = 0.2f,
-                                roughness = 0.3f,
-                            )
-                        }
-                    }
-                    val core = remember(loader) {
-                        runCatching {
-                            loader.createUnlitColorInstance(Color(0xFFFF6F00))
-                        }.getOrElse {
-                            loader.createColorInstance(
-                                color = Color(0xFFFF6F00),
-                                metallic = 0.1f,
-                                roughness = 0.4f,
-                            )
-                        }
-                    }
-                    SphereNode(
-                        radius = AppConfig.ROUTER_MARKER_RADIUS_M * 1.35f,
-                        position = Position(x = rec.x, y = rec.y, z = rec.z),
-                        materialInstance = glow,
-                    )
                     SphereNode(
                         radius = AppConfig.ROUTER_MARKER_RADIUS_M,
-                        position = Position(x = rec.x, y = rec.y, z = rec.z),
-                        materialInstance = core,
-                    )
-                    TextNode(
-                        text = stringResource(R.string.router_ar_label),
-                        fontSize = 22f,
-                        textColor = android.graphics.Color.BLACK,
-                        backgroundColor = 0xCCFFD54F.toInt(),
-                        widthMeters = 0.40f,
-                        heightMeters = 0.14f,
-                        position = Position(x = rec.x, y = rec.y + 0.18f, z = rec.z),
+                        position = Position(
+                            x = rec.x.safeCoord(),
+                            y = rec.y.safeCoord(),
+                            z = rec.z.safeCoord(),
+                        ),
+                        materialInstance = matRouter,
                     )
                 }
             }
 
-            // Speed-test checkpoints — compact cyan markers.
-            speedTests.take(24).forEach { test ->
+            // Speed-test checkpoints (sphere only; tap opens full Mbps dialog).
+            speedTests.take(12).forEach { test ->
                 key("st-${test.id}") {
-                    val markerY = test.poseY
                     val nodeName = "$SPEED_TEST_NODE_PREFIX${test.id}"
-                    val cyanMaterial = remember(loader) {
-                        runCatching {
-                            loader.createUnlitColorInstance(Color(0xFF00E5FF))
-                        }.getOrElse {
-                            loader.createColorInstance(
-                                color = Color(0xFF00E5FF),
-                                metallic = 0.1f,
-                                roughness = 0.4f,
-                            )
-                        }
-                    }
                     SphereNode(
                         radius = AppConfig.SPEED_TEST_MARKER_RADIUS_M,
                         position = Position(
-                            x = test.poseX,
-                            y = markerY,
-                            z = test.poseZ,
+                            x = test.poseX.safeCoord(),
+                            y = test.poseY.safeCoord(fallback = 0.5f),
+                            z = test.poseZ.safeCoord(),
                         ),
-                        materialInstance = cyanMaterial,
-                        apply = { name = nodeName },
-                    )
-                    TextNode(
-                        text = SpeedFormat.formatPairCompact(
-                            test.downloadMbps,
-                            test.uploadMbps,
-                        ),
-                        fontSize = 22f,
-                        textColor = android.graphics.Color.WHITE,
-                        backgroundColor = 0xCC006064.toInt(),
-                        widthMeters = 0.55f,
-                        heightMeters = 0.16f,
-                        position = Position(
-                            x = test.poseX,
-                            y = markerY + AppConfig.SPEED_TEST_LABEL_HEIGHT_M * 0.45f,
-                            z = test.poseZ,
-                        ),
+                        materialInstance = matSpeed,
                         apply = { name = nodeName },
                     )
                 }
@@ -1448,10 +1363,15 @@ private fun rssiTierColor(rssiDbm: Int): Color {
     val medium = UserPreferences.rssiMediumDbm
     val dead = UserPreferences.rssiDeadDbm
     return when {
-        rssiDbm >= strong -> Color(0xFF00C853) // strong green
-        rssiDbm >= medium -> Color(0xFFFFD600) // medium yellow
-        rssiDbm >= dead -> Color(0xFFFF6D00) // weak orange
-        else -> Color(0xFFE51C23) // dead / very weak red
+        rssiDbm >= strong -> Color(0xFF00C853)
+        rssiDbm >= medium -> Color(0xFFFFD600)
+        rssiDbm >= dead -> Color(0xFFFF6D00)
+        else -> Color(0xFFE51C23)
     }
+}
+
+/** Guard NaN/Inf positions that crash Filament transforms. */
+private fun Float.safeCoord(fallback: Float = 0f): Float {
+    return if (isFinite()) this else fallback
 }
 

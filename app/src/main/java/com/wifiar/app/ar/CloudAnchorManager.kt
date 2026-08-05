@@ -63,16 +63,18 @@ class CloudAnchorManager(
     }
 
     /**
-     * Enable Cloud Anchor mode on an ARCore [Config]. Call before session.configure.
+     * Enable Cloud Anchor mode on an ARCore [Config].
+     *
+     * Only mutates [config] — do **not** call [Session.configure] here.
+     * SceneView owns configure; double-configure can crash ARCore on some devices.
      */
     fun applyCloudConfig(session: Session, config: Config) {
         if (!isApiKeyConfigured()) return
         runCatching {
             config.cloudAnchorMode = Config.CloudAnchorMode.ENABLED
-            session.configure(config)
-            Log.d(TAG, "CloudAnchorMode ENABLED")
+            Log.d(TAG, "CloudAnchorMode requested on Config")
         }.onFailure {
-            Log.w(TAG, "Could not enable Cloud Anchors: ${it.message}")
+            Log.w(TAG, "Could not set Cloud Anchors mode: ${it.message}")
         }
     }
 
@@ -163,17 +165,11 @@ class CloudAnchorManager(
     }
 
     /**
-     * Best-effort camera anchor. Safe to call only when ARCore allows an extra update;
-     * returns null on failure instead of crashing.
+     * Best-effort camera anchor.
+     * Does **not** call [Session.update] — SceneView owns the frame loop.
+     * Prefer [createLocalAnchor] with a pose from [ARSessionManager] instead.
      */
-    fun createLocalAnchorAtCamera(session: Session): Anchor? {
-        return runCatching {
-            val frame = session.update()
-            val camera = frame.camera
-            if (camera.trackingState != TrackingState.TRACKING) return null
-            session.createAnchor(camera.pose)
-        }.getOrNull()
-    }
+    fun createLocalAnchorAtCamera(session: Session): Anchor? = null
 
     suspend fun saveCloudAnchorId(sessionId: String, cloudAnchorId: String) {
         sessionDao.setCloudAnchorId(sessionId, cloudAnchorId)

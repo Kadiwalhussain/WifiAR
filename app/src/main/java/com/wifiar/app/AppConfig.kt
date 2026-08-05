@@ -22,18 +22,14 @@ object AppConfig {
     /** How high above the floor plane to float dead-zone labels (metres). */
     const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.28f
 
-    /** Core sample sphere radius in AR (metres) — readable at walk distance. */
-    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.055f
-
-    /** Soft outer glow radius multiplier for sample balls. */
-    const val SAMPLE_GLOW_SCALE: Float = 1.55f
+    /** Core sample sphere radius in AR (metres). */
+    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.05f
 
     /**
-     * Max raw sample spheres drawn in AR at once.
-     * Full multi-AP scans can produce thousands of DB rows — rendering all of
-     * them freezes Filament. Spatial downsample (one ball per cell) keeps FPS up.
+     * Max sample spheres in AR. Keep modest — Filament OOM/crashes if hundreds of
+     * nodes + materials are created/destroyed every frame.
      */
-    const val AR_MAX_SAMPLE_SPHERES: Int = 220
+    const val AR_MAX_SAMPLE_SPHERES: Int = 80
 
     // ── Speed test (Part 6) ──────────────────────────────────────────────────
 
