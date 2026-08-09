@@ -142,22 +142,34 @@ class HeatmapMeshBuilder(
                 .getOrDefault(RSSI_MEDIUM)
             val dead = runCatching { UserPreferences.rssiDeadDbm.toFloat() }
                 .getOrDefault(-80f)
+            val scheme = runCatching { UserPreferences.colorScheme }.getOrDefault("default")
             // Midpoint between medium and dead → orange→red transition.
             val weakMid = (medium + dead) * 0.5f
 
+            val (cStrong, cMedium, cWeak, cVeryWeak) = when (scheme) {
+                "thermal" -> listOf(COLOR_STRONG, COLOR_WEAK, COLOR_VERY_WEAK, floatArrayOf(0.4f, 0f, 0f))
+                "mono" -> listOf(
+                    floatArrayOf(0.3f, 0.6f, 1f),
+                    floatArrayOf(0.2f, 0.4f, 0.8f),
+                    floatArrayOf(0.12f, 0.25f, 0.55f),
+                    floatArrayOf(0.05f, 0.1f, 0.25f),
+                )
+                else -> listOf(COLOR_STRONG, COLOR_MEDIUM, COLOR_WEAK, COLOR_VERY_WEAK)
+            }
+
             val (r, g, b) = when {
-                rssi >= strong -> COLOR_STRONG
+                rssi >= strong -> cStrong
                 rssi >= medium -> {
                     val t = (strong - rssi) / (strong - medium).coerceAtLeast(1f)
-                    lerpColor(COLOR_STRONG, COLOR_MEDIUM, t.coerceIn(0f, 1f))
+                    lerpColor(cStrong, cMedium, t.coerceIn(0f, 1f))
                 }
                 rssi >= weakMid -> {
                     val t = (medium - rssi) / (medium - weakMid).coerceAtLeast(1f)
-                    lerpColor(COLOR_MEDIUM, COLOR_WEAK, t.coerceIn(0f, 1f))
+                    lerpColor(cMedium, cWeak, t.coerceIn(0f, 1f))
                 }
                 else -> {
                     val t = (weakMid - rssi) / (weakMid - dead).coerceAtLeast(1f)
-                    lerpColor(COLOR_WEAK, COLOR_VERY_WEAK, t.coerceIn(0f, 1f))
+                    lerpColor(cWeak, cVeryWeak, t.coerceIn(0f, 1f))
                 }
             }
 

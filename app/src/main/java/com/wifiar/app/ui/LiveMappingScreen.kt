@@ -76,6 +76,7 @@ import com.wifiar.app.data.DataFusionEngine
 import com.wifiar.app.data.SessionManager
 import com.wifiar.app.data.UserPreferences
 import com.wifiar.app.data.analysis.BestNetworkEstimate
+import com.wifiar.app.data.analysis.CoverageSampleSelector
 import com.wifiar.app.data.analysis.DeadZoneDetector
 import com.wifiar.app.data.analysis.DeadZoneRegion
 import com.wifiar.app.data.analysis.NetworkComparisonEngine
@@ -220,6 +221,20 @@ fun LiveMappingScreen(
     var selectedSpeedTest by remember { mutableStateOf<SpeedTestEntity?>(null) }
     var speedTestError by remember { mutableStateOf<String?>(null) }
     var bestNetwork by remember { mutableStateOf<BestNetworkEstimate?>(null) }
+    var lastAnalysisPrefs by remember { mutableStateOf("") }
+
+    var networkTick by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            networkTick++
+            delay(3_000)
+        }
+    }
+    val connectedNet = remember(networkTick) { wifiScanner.connectedNetwork() }
+    val analysisPrefsKey = remember(networkTick) {
+        "${UserPreferences.gridCellSizeM}|${UserPreferences.rssiDeadDbm}|" +
+            "${UserPreferences.arSignalSmoothing}|${UserPreferences.colorScheme}"
+    }
 
     LaunchedEffect(activeSession?.sessionId, samples.size) {
         if (activeSession == null && samples.isEmpty()) {
@@ -227,6 +242,7 @@ fun LiveMappingScreen(
             deadZones = emptyList()
             recomputeGate.reset()
             lastComputeMs = null
+            lastAnalysisPrefs = ""
             selectedDeadZone = null
             selectedSpeedTest = null
             speedTestError = null
@@ -256,24 +272,49 @@ fun LiveMappingScreen(
         }
     }
 
-
-
     // Throttled IDW + dead-zone recompute (crash-safe).
-    LaunchedEffect(samples.size, viewMode) {
+    // CRITICAL: only the mapped network — multi-AP batches at the same pose would
+    // corrupt coverage math if fed raw into IDW.
+    LaunchedEffect(samples.size, viewMode, connectedNet.bssid, connectedNet.ssid, analysisPrefsKey) {
         val needsAnalysis =
             viewMode == MappingViewMode.HEATMAP || viewMode == MappingViewMode.BOTH
         if (!needsAnalysis) return@LaunchedEffect
-        if (!recomputeGate.shouldRecompute(samples.size)) return@LaunchedEffect
 
-        val snapshot = samples.toList()
+        val snapshotAll = samples.toList()
+        if (snapshotAll.isEmpty()) return@LaunchedEffect
+
+        val prefsChanged = analysisPrefsKey != lastAnalysisPrefs
+        if (!prefsChanged && !recomputeGate.shouldRecompute(snapshotAll.size) && heatmapPlane != null) {
+            return@LaunchedEffect
+        }
+
+        val preferredBssid = connectedNet.bssid
+        val preferredSsid = connectedNet.ssid
         val result = runCatching {
             withContext(Dispatchers.Default) {
-                val grid = idw.interpolate(snapshot)
+                var coverage = CoverageSampleSelector.selectForCoverage(
+                    samples = snapshotAll,
+                    preferredBssid = preferredBssid,
+                    preferredSsid = preferredSsid,
+                )
+                if (UserPreferences.arSignalSmoothing) {
+                    coverage = CoverageSampleSelector.smoothSpatially(coverage)
+                }
+                if (coverage.isEmpty()) {
+                    return@withContext AnalysisResult(plane = null, zones = emptyList(), computeMs = 0L)
+                }
+                val interpolator = IdwInterpolator(cellSize = UserPreferences.gridCellSizeM)
+                val grid = interpolator.interpolate(coverage)
                 if (grid.cols == 0) {
                     AnalysisResult(plane = null, zones = emptyList(), computeMs = 0L)
                 } else {
-                    val plane = heatmapBuilder.build(grid, snapshot)
-                    val zones = deadZoneDetector.detect(grid)
+                    val builder = HeatmapMeshBuilder(
+                        deadZoneThresholdDbm = UserPreferences.rssiDeadDbm.toFloat(),
+                    )
+                    val plane = builder.build(grid, coverage)
+                    val zones = DeadZoneDetector(
+                        thresholdDbm = UserPreferences.rssiDeadDbm.toFloat(),
+                    ).detect(grid)
                     AnalysisResult(plane, zones, grid.computeTimeMs)
                 }
             }
@@ -285,7 +326,8 @@ fun LiveMappingScreen(
             heatmapPlane = result.plane
             deadZones = result.zones
             lastComputeMs = result.computeMs
-            recomputeGate.markComputed(snapshot.size)
+            recomputeGate.markComputed(snapshotAll.size)
+            lastAnalysisPrefs = analysisPrefsKey
             selectedDeadZone?.let { sel ->
                 if (result.zones.none { it.id == sel.id }) selectedDeadZone = null
             }
@@ -307,22 +349,24 @@ fun LiveMappingScreen(
     var lastSpeedBanner by remember { mutableStateOf<String?>(null) }
     var lastDownloadMbps by remember { mutableStateOf<Float?>(null) }
     var lastUploadMbps by remember { mutableStateOf<Float?>(null) }
-    var networkTick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        while (isActive) {
-            networkTick++
-            delay(3_000)
-        }
-    }
-    val connectedNet = remember(networkTick) { wifiScanner.connectedNetwork() }
 
     /** Cap AR spheres — one ball per spatial cell; density re-read with networkTick. */
     val densityCap = remember(networkTick) {
         UserPreferences.particleDensityMaxSpheres
             .coerceAtMost(AppConfig.AR_MAX_SAMPLE_SPHERES.coerceAtLeast(24))
     }
-    val arDisplaySamples = remember(samples, densityCap) {
-        downsampleSamplesForAr(samples, densityCap)
+    val arDisplaySamples = remember(samples, densityCap, connectedNet.bssid, connectedNet.ssid, networkTick) {
+        val focused = CoverageSampleSelector.selectForCoverage(
+            samples = samples,
+            preferredBssid = connectedNet.bssid,
+            preferredSsid = connectedNet.ssid,
+        ).ifEmpty { samples }
+        val smoothed = if (UserPreferences.arSignalSmoothing) {
+            CoverageSampleSelector.smoothSpatially(focused)
+        } else {
+            focused
+        }
+        downsampleSamplesForAr(smoothed, densityCap)
     }
 
     suspend fun beginFreshSession(name: String) {
@@ -614,11 +658,14 @@ fun LiveMappingScreen(
                 if (showRaw) {
                     pathSamples.forEach { sample ->
                         key("b-${sample.id}") {
-                            // Match legend: strong ≥−60, fair ≥−75, weak ≥−90
+                            // Match Settings thresholds + analyzer legend
+                            val strongTh = UserPreferences.rssiStrongDbm
+                            val mediumTh = UserPreferences.rssiMediumDbm
+                            val deadTh = UserPreferences.rssiDeadDbm
                             val (coreMat, glowMat) = when {
-                                sample.rssiDbm >= -60 -> matStrong to matStrongGlow
-                                sample.rssiDbm >= -75 -> matMedium to matMediumGlow
-                                sample.rssiDbm >= -90 -> matWeak to matWeakGlow
+                                sample.rssiDbm >= strongTh -> matStrong to matStrongGlow
+                                sample.rssiDbm >= mediumTh -> matMedium to matMediumGlow
+                                sample.rssiDbm > deadTh -> matWeak to matWeakGlow
                                 else -> matDead to matDeadGlow
                             }
                             val x = sample.poseX.safeCoord()
@@ -1519,10 +1566,13 @@ private fun ResumeMappingDialog(
 
 /** Green strong · yellow fair · purple weak · red dead (analyzer mock). */
 private fun rssiTierColor(rssiDbm: Int): Color {
+    val strong = UserPreferences.rssiStrongDbm
+    val medium = UserPreferences.rssiMediumDbm
+    val dead = UserPreferences.rssiDeadDbm
     return when {
-        rssiDbm >= -60 -> Color(0xFF4CAF50)
-        rssiDbm >= -75 -> Color(0xFFFFEB3B)
-        rssiDbm >= -90 -> Color(0xFFAB47BC)
+        rssiDbm >= strong -> Color(0xFF4CAF50)
+        rssiDbm >= medium -> Color(0xFFFFEB3B)
+        rssiDbm > dead -> Color(0xFFAB47BC)
         else -> Color(0xFFE53935)
     }
 }

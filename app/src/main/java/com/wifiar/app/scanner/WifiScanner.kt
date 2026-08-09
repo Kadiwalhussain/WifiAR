@@ -230,16 +230,20 @@ class WifiScanner(
             }
 
         val now = System.currentTimeMillis()
+        val includeHidden = runCatching {
+            com.wifiar.app.data.UserPreferences.includeHiddenNetworks
+        }.getOrDefault(true)
         val samples = raw
             .asSequence()
             .map { it.toRssiSample(fallbackTimestampMs = now) }
-            // Keep all SSIDs (including empty/hidden); only drop rows with no BSSID.
+            // Always require BSSID; optionally drop empty SSIDs (hidden networks).
             .filter { it.bssid.isNotBlank() }
+            .filter { includeHidden || it.ssid.isNotBlank() }
             .sortedByDescending { it.rssiDbm }
             .toList()
 
         _scanResults.value = samples
-        Log.d(TAG, "Scan emitted ${samples.size} AP(s) (all visible networks)")
+        Log.d(TAG, "Scan emitted ${samples.size} AP(s) (includeHidden=$includeHidden)")
     }
 
 

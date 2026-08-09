@@ -74,8 +74,6 @@ fun RouterPlacementScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val db = remember { WifiArDatabase.getInstance(context) }
-    val optimizer = remember { RouterPlacementOptimizer(pathLoss = PathLossModel.indoor()) }
-
     val samples by db.rssiSampleDao()
         .getAllForSession(sessionId)
         .collectAsStateWithLifecycle(initialValue = emptyList())
@@ -97,6 +95,16 @@ fun RouterPlacementScreen(
         scope.launch {
             loading = true
             error = null
+            val pathLoss = if (com.wifiar.app.data.UserPreferences.pathLossIndoor) {
+                PathLossModel.indoor()
+            } else {
+                PathLossModel.openSpace()
+            }
+            val optimizer = RouterPlacementOptimizer(
+                pathLoss = pathLoss,
+                coverageThreshold = com.wifiar.app.data.UserPreferences.rssiMediumDbm.toFloat(),
+                deadThreshold = com.wifiar.app.data.UserPreferences.rssiDeadDbm.toFloat(),
+            )
             val out = withContext(Dispatchers.Default) {
                 optimizer.optimize(samples)
             }
