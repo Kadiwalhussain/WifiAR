@@ -71,6 +71,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.wifiar.app.data.UserPreferences
 import com.wifiar.app.data.local.RssiSampleEntity
 import com.wifiar.app.data.local.WifiArDatabase
 import com.wifiar.app.scanner.RssiSample
@@ -84,7 +85,6 @@ import kotlinx.coroutines.withContext
 import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.pow
-import kotlin.math.sqrt
 import android.graphics.Bitmap
 import android.graphics.Canvas as AndroidCanvas
 import android.graphics.Paint
@@ -125,8 +125,9 @@ fun NetworkInsightsScreen(
 
     LaunchedEffect(Unit) {
         while (isActive) {
-            delay(15_000)
-            if (scanner.cooldownSeconds.value == 0L) {
+            val intervalMs = (UserPreferences.scanIntervalSec.coerceIn(2, 120) * 1_000L)
+            delay(intervalMs)
+            if (UserPreferences.autoScan && scanner.cooldownSeconds.value == 0L) {
                 scanner.triggerScan()
             }
         }

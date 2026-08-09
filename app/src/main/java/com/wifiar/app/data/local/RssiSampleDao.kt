@@ -24,6 +24,9 @@ interface RssiSampleDao {
     @Query("DELETE FROM rssi_samples WHERE sessionId = :sessionId")
     suspend fun deleteSession(sessionId: String)
 
+    @Query("DELETE FROM rssi_samples")
+    suspend fun deleteAll()
+
     @Query("SELECT COUNT(*) FROM rssi_samples WHERE sessionId = :sessionId")
     suspend fun countForSession(sessionId: String): Int
 }

@@ -316,9 +316,13 @@ fun LiveMappingScreen(
     }
     val connectedNet = remember(networkTick) { wifiScanner.connectedNetwork() }
 
-    /** Cap AR spheres — one ball per spatial cell, stable node count. */
-    val arDisplaySamples = remember(samples) {
-        downsampleSamplesForAr(samples, AppConfig.AR_MAX_SAMPLE_SPHERES)
+    /** Cap AR spheres — one ball per spatial cell; density re-read with networkTick. */
+    val densityCap = remember(networkTick) {
+        UserPreferences.particleDensityMaxSpheres
+            .coerceAtMost(AppConfig.AR_MAX_SAMPLE_SPHERES.coerceAtLeast(24))
+    }
+    val arDisplaySamples = remember(samples, densityCap) {
+        downsampleSamplesForAr(samples, densityCap)
     }
 
     suspend fun beginFreshSession(name: String) {

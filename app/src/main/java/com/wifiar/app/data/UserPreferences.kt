@@ -18,6 +18,17 @@ object UserPreferences {
     private const val KEY_GRID_CELL = "grid_cell_m"
     private const val KEY_CLOUD_API_CONFIGURED = "cloud_api_ack"
 
+    // Analyzer settings (mock UI)
+    private const val KEY_AUTO_SCAN = "auto_scan"
+    private const val KEY_SCAN_INTERVAL_SEC = "scan_interval_sec"
+    private const val KEY_INCLUDE_HIDDEN = "include_hidden"
+    private const val KEY_AR_SMOOTHING = "ar_signal_smoothing"
+    private const val KEY_SIGNAL_UNITS = "signal_units" // dbm | percent
+    private const val KEY_COLOR_SCHEME = "color_scheme" // default | thermal | mono
+    private const val KEY_PARTICLE_DENSITY = "particle_density" // low | medium | high
+    private const val KEY_SCAN_ALERTS = "scan_alerts"
+    private const val KEY_WEEKLY_REPORTS = "weekly_reports"
+
     @Volatile
     private var prefs: SharedPreferences? = null
 
@@ -83,5 +94,76 @@ object UserPreferences {
         get() = p()?.getBoolean(KEY_CLOUD_API_CONFIGURED, false) ?: false
         set(v) {
             p()?.edit()?.putBoolean(KEY_CLOUD_API_CONFIGURED, v)?.apply()
+        }
+
+    // ── Scan ────────────────────────────────────────────────────────────────
+
+    var autoScan: Boolean
+        get() = p()?.getBoolean(KEY_AUTO_SCAN, true) ?: true
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_AUTO_SCAN, v)?.apply()
+        }
+
+    /** Preferred scan interval in seconds (UI); Android may throttle further. */
+    var scanIntervalSec: Int
+        get() = p()?.getInt(KEY_SCAN_INTERVAL_SEC, 15) ?: 15
+        set(v) {
+            p()?.edit()?.putInt(KEY_SCAN_INTERVAL_SEC, v.coerceIn(2, 120))?.apply()
+        }
+
+    var includeHiddenNetworks: Boolean
+        get() = p()?.getBoolean(KEY_INCLUDE_HIDDEN, false) ?: false
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_INCLUDE_HIDDEN, v)?.apply()
+        }
+
+    var arSignalSmoothing: Boolean
+        get() = p()?.getBoolean(KEY_AR_SMOOTHING, true) ?: true
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_AR_SMOOTHING, v)?.apply()
+        }
+
+    // ── Visualization ───────────────────────────────────────────────────────
+
+    /** "dbm" or "percent" */
+    var signalUnits: String
+        get() = p()?.getString(KEY_SIGNAL_UNITS, "dbm") ?: "dbm"
+        set(v) {
+            p()?.edit()?.putString(KEY_SIGNAL_UNITS, v)?.apply()
+        }
+
+    /** "default" | "thermal" | "mono" */
+    var colorScheme: String
+        get() = p()?.getString(KEY_COLOR_SCHEME, "default") ?: "default"
+        set(v) {
+            p()?.edit()?.putString(KEY_COLOR_SCHEME, v)?.apply()
+        }
+
+    /** "low" | "medium" | "high" */
+    var particleDensity: String
+        get() = p()?.getString(KEY_PARTICLE_DENSITY, "medium") ?: "medium"
+        set(v) {
+            p()?.edit()?.putString(KEY_PARTICLE_DENSITY, v)?.apply()
+        }
+
+    val particleDensityMaxSpheres: Int
+        get() = when (particleDensity) {
+            "low" -> 8
+            "high" -> 24
+            else -> 16
+        }
+
+    // ── Notifications ───────────────────────────────────────────────────────
+
+    var scanAlerts: Boolean
+        get() = p()?.getBoolean(KEY_SCAN_ALERTS, true) ?: true
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_SCAN_ALERTS, v)?.apply()
+        }
+
+    var weeklyReports: Boolean
+        get() = p()?.getBoolean(KEY_WEEKLY_REPORTS, false) ?: false
+        set(v) {
+            p()?.edit()?.putBoolean(KEY_WEEKLY_REPORTS, v)?.apply()
         }
 }

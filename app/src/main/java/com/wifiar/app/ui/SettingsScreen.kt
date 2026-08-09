@@ -2,11 +2,11 @@
 
 package com.wifiar.app.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,32 +19,28 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.HelpOutline
-import androidx.compose.material.icons.outlined.Cloud
-import androidx.compose.material.icons.outlined.GridOn
+import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.BlurOn
+import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.FileUpload
 import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.RestartAlt
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Palette
+import androidx.compose.material.icons.outlined.Policy
+import androidx.compose.material.icons.outlined.Radar
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.SignalCellularAlt
-import androidx.compose.material.icons.outlined.SignalWifi4Bar
-import androidx.compose.material.icons.outlined.SpaceDashboard
-import androidx.compose.material.icons.outlined.WifiTethering
+import androidx.compose.material.icons.outlined.VisibilityOff
+import androidx.compose.material.icons.outlined.MailOutline
+import androidx.compose.material.icons.outlined.Grain
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -53,10 +49,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,91 +59,107 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.wifiar.app.AppConfig
-import com.wifiar.app.R
 import com.wifiar.app.data.UserPreferences
-import com.wifiar.app.ui.theme.NeonAmber
-import com.wifiar.app.ui.theme.NeonCyan
-import com.wifiar.app.ui.theme.NeonMint
-import com.wifiar.app.ui.theme.RssiDead
-import com.wifiar.app.ui.theme.RssiStrong
-import com.wifiar.app.ui.theme.RssiWeak
+import com.wifiar.app.data.export.HeatmapExporter
+import com.wifiar.app.data.local.WifiArDatabase
+import com.wifiar.app.ui.components.AnalyzerCard
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * Professional settings: section cards, Material icons, and info (i) dialogs.
+ * Analyzer-style Settings matching the mock: scan, visualization,
+ * notifications, data & privacy, about.
  */
 @Composable
 fun SettingsScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    fun infoOf(titleRes: Int, bodyRes: Int) = InfoContent(
-        title = context.getString(titleRes),
-        body = context.getString(bodyRes),
-    )
+    val scope = rememberCoroutineScope()
+    val db = remember { WifiArDatabase.getInstance(context) }
+    val exporter = remember { HeatmapExporter(context) }
 
-    var strong by remember { mutableIntStateOf(UserPreferences.rssiStrongDbm) }
-    var medium by remember { mutableIntStateOf(UserPreferences.rssiMediumDbm) }
-    var dead by remember { mutableIntStateOf(UserPreferences.rssiDeadDbm) }
-    var indoor by remember { mutableStateOf(UserPreferences.pathLossIndoor) }
-    var gridCell by remember { mutableFloatStateOf(UserPreferences.gridCellSizeM) }
-    var cloudAck by remember { mutableStateOf(UserPreferences.cloudApiAcknowledged) }
-    var info by remember { mutableStateOf<InfoContent?>(null) }
-    var showResetToast by remember { mutableStateOf(false) }
+    var autoScan by remember { mutableStateOf(UserPreferences.autoScan) }
+    var scanInterval by remember { mutableStateOf(UserPreferences.scanIntervalSec) }
+    var includeHidden by remember { mutableStateOf(UserPreferences.includeHiddenNetworks) }
+    var arSmoothing by remember { mutableStateOf(UserPreferences.arSignalSmoothing) }
+    var signalUnits by remember { mutableStateOf(UserPreferences.signalUnits) }
+    var colorScheme by remember { mutableStateOf(UserPreferences.colorScheme) }
+    var density by remember { mutableStateOf(UserPreferences.particleDensity) }
+    var scanAlerts by remember { mutableStateOf(UserPreferences.scanAlerts) }
+    var weeklyReports by remember { mutableStateOf(UserPreferences.weeklyReports) }
 
-    info?.let { content ->
-        InfoDialog(
-            content = content,
-            onDismiss = { info = null },
+    var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
+    var statusMsg by remember { mutableStateOf<String?>(null) }
+
+    dialog?.let { d ->
+        SettingsChoiceDialog(
+            dialog = d,
+            onDismiss = { dialog = null },
+            onPick = { value ->
+                when (d) {
+                    is SettingsDialog.ScanInterval -> {
+                        scanInterval = value as Int
+                        UserPreferences.scanIntervalSec = scanInterval
+                    }
+                    is SettingsDialog.SignalUnits -> {
+                        signalUnits = value as String
+                        UserPreferences.signalUnits = signalUnits
+                    }
+                    is SettingsDialog.ColorScheme -> {
+                        colorScheme = value as String
+                        UserPreferences.colorScheme = colorScheme
+                    }
+                    is SettingsDialog.ParticleDensity -> {
+                        density = value as String
+                        UserPreferences.particleDensity = density
+                    }
+                    is SettingsDialog.ClearHistory -> { /* confirm handled below */ }
+                }
+                dialog = null
+            },
+            onConfirmClear = {
+                dialog = null
+                scope.launch {
+                    withContext(Dispatchers.IO) {
+                        runCatching {
+                            db.speedTestDao().deleteAll()
+                            db.rssiSampleDao().deleteAll()
+                            db.mappingSessionDao().deleteAll()
+                        }
+                    }
+                    statusMsg = "Scan history cleared"
+                    Toast.makeText(context, "All local sessions deleted", Toast.LENGTH_SHORT).show()
+                }
+            },
         )
     }
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color(0xFF0B0D12),
         topBar = {
             TopAppBar(
                 title = {
                     Column {
                         Text(
-                            text = stringResource(R.string.settings_title),
-                            style = MaterialTheme.typography.titleLarge,
+                            "Wi‑Fi AR Analyzer",
+                            color = Color.White,
                             fontWeight = FontWeight.SemiBold,
                         )
                         Text(
-                            text = stringResource(R.string.settings_subtitle),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            "Settings",
+                            color = Color.White.copy(alpha = 0.55f),
+                            style = MaterialTheme.typography.labelMedium,
                         )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.background,
+                    containerColor = Color(0xFF0B0D12),
                 ),
-                actions = {
-                    IconButton(
-                        onClick = {
-                            info = infoOf(
-                                R.string.settings_info_rssi_title,
-                                R.string.settings_info_rssi_body,
-                            )
-                        },
-                        modifier = Modifier.semantics {
-                            contentDescription = "About settings"
-                        },
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Info,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
-                },
             )
         },
     ) { padding ->
@@ -157,596 +168,454 @@ fun SettingsScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // ── RSSI thresholds ──────────────────────────────────────────────
-            SettingsSectionCard(
-                icon = Icons.Outlined.SignalCellularAlt,
-                title = stringResource(R.string.settings_rssi_section),
-                subtitle = stringResource(R.string.settings_rssi_section_sub),
-                onInfo = {
-                    info = infoOf(
-                        R.string.settings_info_rssi_title,
-                        R.string.settings_info_rssi_body,
-                    )
-                },
-            ) {
-                LegendStrip()
-                Spacer(modifier = Modifier.height(12.dp))
-
-                ThresholdRow(
-                    color = RssiStrong,
-                    title = stringResource(R.string.settings_strong),
-                    valueLabel = stringResource(R.string.settings_strong_value, strong),
-                    value = strong.toFloat(),
-                    valueRange = -60f..-30f,
-                    onChange = {
-                        strong = it.toInt().coerceIn(-60, -30)
-                        // Keep ordering: strong > medium > dead
-                        if (strong <= medium) {
-                            medium = (strong - 10).coerceIn(-80, -55)
-                            UserPreferences.rssiMediumDbm = medium
-                        }
-                        UserPreferences.rssiStrongDbm = strong
-                    },
-                    onInfo = {
-                        info = infoOf(
-                            R.string.settings_info_strong_title,
-                            R.string.settings_info_strong_body,
-                        )
-                    },
-                    activeColor = RssiStrong,
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                )
-
-                ThresholdRow(
-                    color = NeonAmber,
-                    title = stringResource(R.string.settings_medium),
-                    valueLabel = stringResource(R.string.settings_medium_value, medium),
-                    value = medium.toFloat(),
-                    valueRange = -80f..-55f,
-                    onChange = {
-                        medium = it.toInt().coerceIn(-80, -55)
-                        if (medium >= strong) {
-                            strong = (medium + 10).coerceIn(-60, -30)
-                            UserPreferences.rssiStrongDbm = strong
-                        }
-                        if (medium <= dead) {
-                            dead = (medium - 5).coerceIn(-95, -70)
-                            UserPreferences.rssiDeadDbm = dead
-                        }
-                        UserPreferences.rssiMediumDbm = medium
-                    },
-                    onInfo = {
-                        info = infoOf(
-                            R.string.settings_info_medium_title,
-                            R.string.settings_info_medium_body,
-                        )
-                    },
-                    activeColor = NeonAmber,
-                )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                )
-
-                ThresholdRow(
-                    color = RssiDead,
-                    title = stringResource(R.string.settings_dead),
-                    valueLabel = stringResource(R.string.settings_dead_value, dead),
-                    value = dead.toFloat(),
-                    valueRange = -95f..-70f,
-                    onChange = {
-                        dead = it.toInt().coerceIn(-95, -70)
-                        if (dead >= medium) {
-                            medium = (dead + 5).coerceIn(-80, -55)
-                            UserPreferences.rssiMediumDbm = medium
-                        }
-                        UserPreferences.rssiDeadDbm = dead
-                    },
-                    onInfo = {
-                        info = infoOf(
-                            R.string.settings_info_dead_title,
-                            R.string.settings_info_dead_body,
-                        )
-                    },
-                    activeColor = RssiDead,
-                )
+            statusMsg?.let {
+                Text(it, color = Color(0xFF69F0AE), style = MaterialTheme.typography.labelMedium)
             }
 
-            // ── Path loss ────────────────────────────────────────────────────
-            SettingsSectionCard(
-                icon = Icons.Outlined.WifiTethering,
-                title = stringResource(R.string.settings_path_loss_section),
-                subtitle = stringResource(R.string.settings_path_loss_section_sub),
-                onInfo = {
-                    info = infoOf(
-                        R.string.settings_info_path_title,
-                        R.string.settings_info_path_body,
+            // ── SCAN SETTINGS ────────────────────────────────────────────
+            SettingsSectionHeader("SCAN SETTINGS", Color(0xFF69F0AE))
+            AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    SettingsToggleRow(
+                        icon = Icons.Outlined.Radar,
+                        iconTint = Color(0xFF69F0AE),
+                        title = "Auto Scan",
+                        subtitle = "Automatically scan for Wi‑Fi networks",
+                        checked = autoScan,
+                        onChecked = {
+                            autoScan = it
+                            UserPreferences.autoScan = it
+                        },
                     )
-                },
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
-                ) {
-                    PathLossChoice(
-                        selected = indoor,
-                        title = stringResource(R.string.settings_path_indoor),
-                        detail = stringResource(
-                            R.string.settings_path_indoor_detail,
-                            AppConfig.PATH_LOSS_EXPONENT_INDOOR,
-                        ),
-                        icon = Icons.Outlined.SpaceDashboard,
+                    SettingsNavRow(
+                        icon = Icons.Outlined.Schedule,
+                        iconTint = Color(0xFF64B5F6),
+                        title = "Scan Interval",
+                        value = "$scanInterval seconds",
+                        onClick = { dialog = SettingsDialog.ScanInterval },
+                    )
+                    SettingsToggleRow(
+                        icon = Icons.Outlined.VisibilityOff,
+                        iconTint = Color(0xFFAB47BC),
+                        title = "Include Hidden Networks",
+                        subtitle = "Show hidden Wi‑Fi networks in scan",
+                        checked = includeHidden,
+                        onChecked = {
+                            includeHidden = it
+                            UserPreferences.includeHiddenNetworks = it
+                        },
+                    )
+                    SettingsToggleRow(
+                        icon = Icons.Outlined.BlurOn,
+                        iconTint = Color(0xFFFFA726),
+                        title = "AR Signal Smoothing",
+                        subtitle = "Smooth signal changes for better visualization",
+                        checked = arSmoothing,
+                        onChecked = {
+                            arSmoothing = it
+                            UserPreferences.arSignalSmoothing = it
+                        },
+                    )
+                }
+            }
+
+            // ── VISUALIZATION ────────────────────────────────────────────
+            SettingsSectionHeader("VISUALIZATION", Color(0xFF69F0AE))
+            AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    SettingsNavRow(
+                        icon = Icons.Outlined.SignalCellularAlt,
+                        iconTint = Color(0xFF42A5F5),
+                        title = "Signal Units",
+                        value = if (signalUnits == "percent") "% (relative)" else "dBm (decibel-milliwatts)",
+                        onClick = { dialog = SettingsDialog.SignalUnits },
+                    )
+                    SettingsNavRow(
+                        icon = Icons.Outlined.Palette,
+                        iconTint = Color(0xFFFFEB3B),
+                        title = "Color Scheme",
+                        value = colorSchemeLabel(colorScheme),
+                        onClick = { dialog = SettingsDialog.ColorScheme },
+                    )
+                    SettingsNavRow(
+                        icon = Icons.Outlined.Grain,
+                        iconTint = Color(0xFFE040FB),
+                        title = "AR Particle Density",
+                        value = density.replaceFirstChar { it.uppercase() },
+                        onClick = { dialog = SettingsDialog.ParticleDensity },
+                    )
+                }
+            }
+
+            // ── NOTIFICATIONS ────────────────────────────────────────────
+            SettingsSectionHeader("NOTIFICATIONS", Color(0xFF69F0AE))
+            AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    SettingsToggleRow(
+                        icon = Icons.Outlined.Notifications,
+                        iconTint = Color(0xFFEF5350),
+                        title = "Scan Alerts",
+                        subtitle = "Get notified when weak spots are detected",
+                        checked = scanAlerts,
+                        onChecked = {
+                            scanAlerts = it
+                            UserPreferences.scanAlerts = it
+                        },
+                    )
+                    SettingsToggleRow(
+                        icon = Icons.Outlined.MailOutline,
+                        iconTint = Color(0xFF42A5F5),
+                        title = "Weekly Reports",
+                        subtitle = "Receive weekly Wi‑Fi performance reports",
+                        checked = weeklyReports,
+                        onChecked = {
+                            weeklyReports = it
+                            UserPreferences.weeklyReports = it
+                            if (it) {
+                                Toast.makeText(
+                                    context,
+                                    "Weekly reports saved as preference (local only)",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
+                            }
+                        },
+                    )
+                }
+            }
+
+            // ── DATA & PRIVACY ───────────────────────────────────────────
+            SettingsSectionHeader("DATA & PRIVACY", Color(0xFF69F0AE))
+            AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+                Column {
+                    SettingsNavRow(
+                        icon = Icons.Outlined.FileUpload,
+                        iconTint = Color(0xFF26C6DA),
+                        title = "Export Scan History",
+                        value = "Save your scan data to a file",
                         onClick = {
-                            indoor = true
-                            UserPreferences.pathLossIndoor = true
+                            scope.launch {
+                                val ok = withContext(Dispatchers.IO) {
+                                    exportAllSessions(db, exporter)
+                                }
+                                statusMsg = if (ok) {
+                                    "Export ready — pick an app to share"
+                                } else {
+                                    "Nothing to export yet. Map a session first."
+                                }
+                                Toast.makeText(context, statusMsg, Toast.LENGTH_SHORT).show()
+                            }
                         },
-                        modifier = Modifier.weight(1f),
                     )
-                    PathLossChoice(
-                        selected = !indoor,
-                        title = stringResource(R.string.settings_path_open),
-                        detail = stringResource(
-                            R.string.settings_path_open_detail,
-                            AppConfig.PATH_LOSS_EXPONENT_OPEN,
-                        ),
-                        icon = Icons.Outlined.SignalWifi4Bar,
+                    SettingsNavRow(
+                        icon = Icons.Outlined.DeleteForever,
+                        iconTint = Color(0xFFEF5350),
+                        title = "Clear Scan History",
+                        value = "Remove all saved scan data",
+                        onClick = { dialog = SettingsDialog.ClearHistory },
+                    )
+                    SettingsNavRow(
+                        icon = Icons.Outlined.Policy,
+                        iconTint = Color(0xFF5C6BC0),
+                        title = "Privacy Policy",
+                        value = "Learn how we protect your data",
                         onClick = {
-                            indoor = false
-                            UserPreferences.pathLossIndoor = false
+                            runCatching {
+                                context.startActivity(
+                                    Intent(
+                                        Intent.ACTION_VIEW,
+                                        Uri.parse("https://developers.google.com/ar/data-privacy"),
+                                    ),
+                                )
+                            }
                         },
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-                Spacer(modifier = Modifier.height(10.dp))
-                Text(
-                    text = stringResource(R.string.settings_path_note),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-
-            // ── Grid ─────────────────────────────────────────────────────────
-            SettingsSectionCard(
-                icon = Icons.Outlined.GridOn,
-                title = stringResource(R.string.settings_grid_section),
-                subtitle = stringResource(R.string.settings_grid_section_sub),
-                onInfo = {
-                    info = infoOf(
-                        R.string.settings_info_grid_title,
-                        R.string.settings_info_grid_body,
-                    )
-                },
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_grid_cell),
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Medium,
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                    ) {
-                        Text(
-                            text = stringResource(R.string.settings_grid_cell_value, gridCell),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.height(6.dp))
-                Slider(
-                    value = gridCell,
-                    onValueChange = {
-                        gridCell = (Math.round(it * 20) / 20f).coerceIn(0.15f, 1.0f)
-                        UserPreferences.gridCellSizeM = gridCell
-                    },
-                    valueRange = 0.15f..1.0f,
-                    steps = 16,
-                    colors = SliderDefaults.colors(
-                        thumbColor = NeonCyan,
-                        activeTrackColor = NeonCyan,
-                        inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
-                    ),
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Text(
-                        stringResource(R.string.settings_grid_fine),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        stringResource(R.string.settings_grid_coarse),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
 
-            // ── Cloud Anchors ────────────────────────────────────────────────
-            SettingsSectionCard(
-                icon = Icons.Outlined.Cloud,
-                title = stringResource(R.string.settings_cloud_section),
-                subtitle = stringResource(R.string.settings_cloud_section_sub),
-                onInfo = {
-                    info = infoOf(
-                        R.string.settings_info_cloud_title,
-                        R.string.settings_info_cloud_body,
-                    )
-                },
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_cloud_body),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        text = stringResource(R.string.settings_cloud_ack),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.weight(1f),
-                    )
-                    Switch(
-                        checked = cloudAck,
-                        onCheckedChange = {
-                            cloudAck = it
-                            UserPreferences.cloudApiAcknowledged = it
-                        },
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = MaterialTheme.colorScheme.onPrimary,
-                            checkedTrackColor = NeonCyan,
-                        ),
-                    )
-                }
-            }
-
-            // ── About / reset ────────────────────────────────────────────────
-            SettingsSectionCard(
-                icon = Icons.Outlined.Info,
-                title = stringResource(R.string.settings_about_section),
-                subtitle = stringResource(R.string.settings_version_sub),
-                showInfo = false,
-            ) {
-                Text(
-                    text = stringResource(R.string.settings_version, "1.0.0"),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                FilledTonalButton(
+            // ── ABOUT ────────────────────────────────────────────────────
+            SettingsSectionHeader("ABOUT", Color(0xFF69F0AE))
+            AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+                SettingsNavRow(
+                    icon = Icons.Outlined.Info,
+                    iconTint = Color(0xFFAB47BC),
+                    title = "Wi‑Fi AR Analyzer",
+                    value = "Version 1.2.0 (WifiAR)",
                     onClick = {
-                        strong = -50
-                        medium = -70
-                        dead = -80
-                        indoor = true
-                        gridCell = 0.3f
-                        cloudAck = false
-                        UserPreferences.rssiStrongDbm = strong
-                        UserPreferences.rssiMediumDbm = medium
-                        UserPreferences.rssiDeadDbm = dead
-                        UserPreferences.pathLossIndoor = true
-                        UserPreferences.gridCellSizeM = 0.3f
-                        UserPreferences.cloudApiAcknowledged = false
-                        showResetToast = true
+                        Toast.makeText(
+                            context,
+                            "WifiAR · spatial Wi‑Fi survey for Android",
+                            Toast.LENGTH_SHORT,
+                        ).show()
                     },
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(
-                        imageVector = Icons.Outlined.RestartAlt,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(stringResource(R.string.settings_reset))
-                }
-                AnimatedVisibility(
-                    visible = showResetToast,
-                    enter = fadeIn(),
-                    exit = fadeOut(),
-                ) {
+                )
+            }
+
+            // Advanced RSSI thresholds (kept for power users)
+            SettingsSectionHeader("ADVANCED · RSSI THRESHOLDS", Color(0xFF78909C))
+            AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
-                        text = stringResource(R.string.settings_reset_done),
+                        "Strong ≥ ${UserPreferences.rssiStrongDbm} · Fair ≥ ${UserPreferences.rssiMediumDbm} · Dead ≤ ${UserPreferences.rssiDeadDbm} dBm",
+                        color = Color.White.copy(alpha = 0.7f),
                         style = MaterialTheme.typography.labelMedium,
-                        color = NeonMint,
-                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    Text(
+                        "Grid ${UserPreferences.gridCellSizeM} m · Path-loss ${if (UserPreferences.pathLossIndoor) "indoor" else "open"}",
+                        color = Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                    Text(
+                        "Cloud Anchors: ${if (UserPreferences.cloudApiAcknowledged) "acknowledged" else "not set"}",
+                        color = Color.White.copy(alpha = 0.45f),
+                        style = MaterialTheme.typography.labelSmall,
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
-// ── Models & dialogs ─────────────────────────────────────────────────────────
-
-private data class InfoContent(
-    val title: String,
-    val body: String,
-)
+// ── Row widgets ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun InfoDialog(
-    content: InfoContent,
-    onDismiss: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = {
-            Icon(
-                imageVector = Icons.Outlined.Info,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
-        },
-        title = {
-            Text(
-                text = content.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-        },
-        text = {
-            Text(
-                text = content.body,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = onDismiss) {
-                Text(stringResource(R.string.settings_got_it))
-            }
-        },
-        shape = RoundedCornerShape(20.dp),
+private fun SettingsSectionHeader(title: String, color: Color) {
+    Text(
+        text = title,
+        color = color,
+        style = MaterialTheme.typography.labelMedium,
+        fontWeight = FontWeight.Bold,
+        modifier = Modifier.padding(start = 4.dp, top = 4.dp),
     )
 }
 
-// ── Building blocks ──────────────────────────────────────────────────────────
-
 @Composable
-private fun SettingsSectionCard(
+private fun SettingsToggleRow(
     icon: ImageVector,
+    iconTint: Color,
     title: String,
     subtitle: String,
-    onInfo: (() -> Unit)? = null,
-    showInfo: Boolean = true,
-    content: @Composable () -> Unit,
+    checked: Boolean,
+    onChecked: (Boolean) -> Unit,
 ) {
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(18.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface,
-        ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        border = androidx.compose.foundation.BorderStroke(
-            1.dp,
-            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
-        ),
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = icon,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (showInfo && onInfo != null) {
-                    InfoIconButton(onClick = onInfo)
-                }
-            }
-            Spacer(modifier = Modifier.height(14.dp))
-            content()
-        }
-    }
-}
-
-@Composable
-private fun InfoIconButton(onClick: () -> Unit) {
-    IconButton(
-        onClick = onClick,
-        modifier = Modifier
-            .size(36.dp)
-            .semantics { contentDescription = "More info" },
-    ) {
-        Icon(
-            imageVector = Icons.AutoMirrored.Outlined.HelpOutline,
-            contentDescription = stringResource(R.string.settings_info),
-            tint = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(20.dp),
-        )
-    }
-}
-
-@Composable
-private fun LegendStrip() {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        horizontalArrangement = Arrangement.SpaceEvenly,
+            .padding(vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LegendDot(RssiStrong, "Strong")
-        LegendDot(NeonAmber, "Medium")
-        LegendDot(RssiWeak, "Weak")
-        LegendDot(RssiDead, "Dead")
-    }
-}
-
-@Composable
-private fun LegendDot(color: Color, label: String) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Box(
-            modifier = Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(color),
-        )
-        Spacer(modifier = Modifier.width(5.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun ThresholdRow(
-    color: Color,
-    title: String,
-    valueLabel: String,
-    value: Float,
-    valueRange: ClosedFloatingPointRange<Float>,
-    onChange: (Float) -> Unit,
-    onInfo: () -> Unit,
-    activeColor: Color,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(10.dp)
-                    .clip(CircleShape)
-                    .background(color)
-                    .border(1.dp, color.copy(alpha = 0.4f), CircleShape),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.weight(1f),
-            )
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = color.copy(alpha = 0.14f),
-            ) {
-                Text(
-                    text = valueLabel,
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = color,
-                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                )
-            }
-            InfoIconButton(onClick = onInfo)
+        SettingsIcon(icon, iconTint)
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(subtitle, color = Color.White.copy(alpha = 0.5f), style = MaterialTheme.typography.labelSmall)
         }
-        Slider(
-            value = value.coerceIn(valueRange.start, valueRange.endInclusive),
-            onValueChange = onChange,
-            valueRange = valueRange,
-            colors = SliderDefaults.colors(
-                thumbColor = activeColor,
-                activeTrackColor = activeColor,
-                inactiveTrackColor = MaterialTheme.colorScheme.outlineVariant,
+        Switch(
+            checked = checked,
+            onCheckedChange = onChecked,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF43A047),
+                uncheckedTrackColor = Color(0xFF2A2F38),
             ),
         )
     }
 }
 
 @Composable
-private fun PathLossChoice(
-    selected: Boolean,
-    title: String,
-    detail: String,
+private fun SettingsNavRow(
     icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    value: String,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
 ) {
-    val border = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.outlineVariant
-    }
-    val bg = if (selected) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
-    } else {
-        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-    }
-    Surface(
-        onClick = onClick,
-        modifier = modifier,
-        shape = RoundedCornerShape(14.dp),
-        color = bg,
-        border = androidx.compose.foundation.BorderStroke(1.dp, border),
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (selected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(22.dp),
+        SettingsIcon(icon, iconTint)
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(value, color = Color(0xFF69F0AE).copy(alpha = 0.9f), style = MaterialTheme.typography.labelSmall)
+        }
+        Icon(
+            Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.35f),
+        )
+    }
+}
+
+@Composable
+private fun SettingsIcon(icon: ImageVector, tint: Color) {
+    Box(
+        modifier = Modifier
+            .size(36.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(tint.copy(alpha = 0.15f)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+    }
+}
+
+// ── Dialogs ──────────────────────────────────────────────────────────────────
+
+private sealed class SettingsDialog {
+    data object ScanInterval : SettingsDialog()
+    data object SignalUnits : SettingsDialog()
+    data object ColorScheme : SettingsDialog()
+    data object ParticleDensity : SettingsDialog()
+    data object ClearHistory : SettingsDialog()
+}
+
+@Composable
+private fun SettingsChoiceDialog(
+    dialog: SettingsDialog,
+    onDismiss: () -> Unit,
+    onPick: (Any) -> Unit,
+    onConfirmClear: () -> Unit,
+) {
+    when (dialog) {
+        SettingsDialog.ClearHistory -> {
+            AlertDialog(
+                onDismissRequest = onDismiss,
+                title = { Text("Clear scan history?") },
+                text = {
+                    Text("This permanently deletes all mapping sessions, RSSI samples, and speed tests on this device.")
+                },
+                confirmButton = {
+                    TextButton(onClick = onConfirmClear) {
+                        Text("Delete all", color = Color(0xFFEF5350))
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = onDismiss) { Text("Cancel") }
+                },
             )
-            Text(
-                text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = if (selected) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurface,
+        }
+        SettingsDialog.ScanInterval -> {
+            ChoiceDialog(
+                title = "Scan Interval",
+                options = listOf(
+                    2 to "2 seconds",
+                    5 to "5 seconds",
+                    15 to "15 seconds",
+                    30 to "30 seconds",
+                    60 to "60 seconds",
+                ),
+                onDismiss = onDismiss,
+                onPick = { onPick(it) },
             )
-            Text(
-                text = detail,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+        }
+        SettingsDialog.SignalUnits -> {
+            ChoiceDialog(
+                title = "Signal Units",
+                options = listOf(
+                    "dbm" to "dBm (decibel-milliwatts)",
+                    "percent" to "% (relative)",
+                ),
+                onDismiss = onDismiss,
+                onPick = { onPick(it) },
+            )
+        }
+        SettingsDialog.ColorScheme -> {
+            ChoiceDialog(
+                title = "Color Scheme",
+                options = listOf(
+                    "default" to "Default (Green-Yellow-Purple)",
+                    "thermal" to "Thermal (Green-Orange-Red)",
+                    "mono" to "Mono (Blue scale)",
+                ),
+                onDismiss = onDismiss,
+                onPick = { onPick(it) },
+            )
+        }
+        SettingsDialog.ParticleDensity -> {
+            ChoiceDialog(
+                title = "AR Particle Density",
+                options = listOf(
+                    "low" to "Low (smoother)",
+                    "medium" to "Medium",
+                    "high" to "High (more balls)",
+                ),
+                onDismiss = onDismiss,
+                onPick = { onPick(it) },
             )
         }
     }
+}
+
+@Composable
+private fun <T> ChoiceDialog(
+    title: String,
+    options: List<Pair<T, String>>,
+    onDismiss: () -> Unit,
+    onPick: (T) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEach { (value, label) ->
+                    Text(
+                        text = label,
+                        color = Color(0xFF69F0AE),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(value) }
+                            .padding(vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
+}
+
+private fun colorSchemeLabel(key: String): String = when (key) {
+    "thermal" -> "Thermal (Green-Orange-Red)"
+    "mono" -> "Mono (Blue scale)"
+    else -> "Default (Green-Yellow-Purple)"
+}
+
+/** Exports the newest session that has RSSI samples (PNG + CSV share sheet). */
+private suspend fun exportAllSessions(
+    db: WifiArDatabase,
+    exporter: HeatmapExporter,
+): Boolean {
+    return runCatching {
+        val sessions = db.mappingSessionDao().getRecentSessions()
+            .ifEmpty { db.mappingSessionDao().getResumableSessions("") }
+        for (session in sessions) {
+            val samples = db.rssiSampleDao().getAllForSessionOnce(session.sessionId)
+            if (samples.isEmpty()) continue
+            val speeds = db.speedTestDao().getAllForSessionOnce(session.sessionId)
+            val files = exporter.exportSession(
+                locationName = session.locationName,
+                startTimeMs = session.startTimeMs,
+                samples = samples,
+                speedTests = speeds,
+            )
+            withContext(Dispatchers.Main) {
+                exporter.shareBoth(files.pngUri, files.csvUri)
+            }
+            return@runCatching true
+        }
+        false
+    }.getOrDefault(false)
 }

@@ -21,6 +21,9 @@ interface SpeedTestDao {
     @Query("DELETE FROM speed_tests WHERE sessionId = :sessionId")
     suspend fun deleteSession(sessionId: String)
 
+    @Query("DELETE FROM speed_tests")
+    suspend fun deleteAll()
+
     @Query("SELECT COUNT(*) FROM speed_tests WHERE sessionId = :sessionId")
     suspend fun countForSession(sessionId: String): Int
 }

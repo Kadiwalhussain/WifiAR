@@ -87,6 +87,16 @@ interface MappingSessionDao {
     )
     suspend fun getResumableSessions(locationName: String): List<MappingSessionEntity>
 
+    /** All sessions newest first — used for export / clear-history UX. */
+    @Query(
+        """
+        SELECT * FROM mapping_sessions
+        ORDER BY startTimeMs DESC
+        LIMIT 50
+        """,
+    )
+    suspend fun getRecentSessions(): List<MappingSessionEntity>
+
     @Query(
         """
         SELECT s.sessionId AS sessionId,
@@ -106,4 +116,7 @@ interface MappingSessionDao {
 
     @Query("DELETE FROM mapping_sessions WHERE sessionId = :sessionId")
     suspend fun deleteSession(sessionId: String)
+
+    @Query("DELETE FROM mapping_sessions")
+    suspend fun deleteAll()
 }
