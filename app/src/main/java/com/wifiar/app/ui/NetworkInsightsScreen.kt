@@ -43,10 +43,12 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.foundation.Image
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -59,26 +61,35 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.wifiar.app.data.local.RssiSampleEntity
+import com.wifiar.app.data.local.WifiArDatabase
 import com.wifiar.app.scanner.RssiSample
 import com.wifiar.app.scanner.WifiChannelUtils
 import com.wifiar.app.scanner.WifiScanner
 import com.wifiar.app.ui.components.AnalyzerCard
-import com.wifiar.app.ui.components.CompactPrimaryButton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
-import kotlin.math.cos
+import kotlinx.coroutines.withContext
 import kotlin.math.exp
-import kotlin.math.sin
-import kotlin.math.PI
+import kotlin.math.hypot
+import kotlin.math.pow
+import kotlin.math.sqrt
+import android.graphics.Bitmap
+import android.graphics.Canvas as AndroidCanvas
+import android.graphics.Paint
+import android.graphics.RadialGradient
+import android.graphics.Shader
 
 private enum class InsightsTab { OVERVIEW, CHANNELS, HEATMAP }
 private enum class BandFilter { GHZ_24, GHZ_5 }
@@ -266,7 +277,15 @@ fun NetworkInsightsScreen(
                     item { RouterTipCard() }
                 }
                 InsightsTab.HEATMAP -> {
-                    item { HeatmapHintCard() }
+                    item {
+                        HeatmapInsightsSection(
+                            networks = results,
+                            connected = connected,
+                            scanner = scanner,
+                            isScanning = isScanning,
+                            canScan = cooldown == 0L && !isScanning,
+                        )
+                    }
                 }
             }
         }
@@ -866,28 +885,588 @@ private fun RouterTipCard() {
     }
 }
 
+/**
+ * Heatmap tab: 2D coverage map, live RSSI chart, recommendations.
+ */
 @Composable
-private fun HeatmapHintCard() {
-    AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun HeatmapInsightsSection(
+    networks: List<RssiSample>,
+    connected: WifiScanner.ConnectedNetwork,
+    scanner: WifiScanner,
+    isScanning: Boolean,
+    canScan: Boolean,
+) {
+    val context = LocalContext.current
+    val db = remember { WifiArDatabase.getInstance(context) }
+
+    // Live RSSI history (last ~60s)
+    val history = remember { mutableStateListOf<Pair<Long, Int>>() }
+    val liveRssi = remember(networks, connected.bssid) {
+        networks.firstOrNull { it.bssid.equals(connected.bssid, true) }?.rssiDbm
+            ?: networks.maxByOrNull { it.rssiDbm }?.rssiDbm
+    }
+    LaunchedEffect(liveRssi) {
+        val r = liveRssi ?: return@LaunchedEffect
+        val now = System.currentTimeMillis()
+        history.add(now to r)
+        val cutoff = now - 60_000L
+        while (history.isNotEmpty() && history.first().first < cutoff) {
+            history.removeAt(0)
+        }
+    }
+    // Also tick every second so chart animates even if RSSI unchanged
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            delay(1_000)
+            val r = liveRssi
+            if (r != null) {
+                val now = System.currentTimeMillis()
+                history.add(now to r)
+                val cutoff = now - 60_000L
+                while (history.isNotEmpty() && history.first().first < cutoff) {
+                    history.removeAt(0)
+                }
+            }
+        }
+    }
+
+    // Mapped session samples for real spatial heatmap (if any)
+    var mappedSamples by remember { mutableStateOf<List<RssiSampleEntity>>(emptyList()) }
+    var mapLabel by remember { mutableStateOf("Live estimate") }
+    LaunchedEffect(Unit) {
+        mappedSamples = withContext(Dispatchers.IO) {
+            runCatching {
+                val sessions = db.mappingSessionDao().getResumableSessions("")
+                val latest = sessions.firstOrNull()
+                    ?: return@runCatching emptyList()
+                val all = db.rssiSampleDao().getAllForSessionOnce(latest.sessionId)
+                if (all.size >= 5) {
+                    mapLabel = latest.locationName.ifBlank { "Last session" }
+                    all
+                } else {
+                    emptyList()
+                }
+            }.getOrDefault(emptyList())
+        }
+    }
+
+    val peakRssi = liveRssi ?: -65
+    val heatmapBitmap = remember(mappedSamples, peakRssi, networks.size) {
+        if (mappedSamples.size >= 5) {
+            buildSpatialHeatmapBitmap(mappedSamples, 220)
+        } else {
+            buildRadialHeatmapBitmap(peakRssi.coerceIn(-95, -30), 220)
+        }
+    }
+
+    val quality = WifiChannelUtils.qualityLabel(peakRssi)
+    val accent = Color(WifiChannelUtils.qualityColorArgb(peakRssi))
+
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        // ── Heatmap map card ─────────────────────────────────────────────
+        AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Wi‑Fi Signal Heatmap",
+                            color = Color.White,
+                            fontWeight = FontWeight.SemiBold,
+                            style = MaterialTheme.typography.titleSmall,
+                        )
+                        Text(
+                            "Visualize signal strength around you",
+                            color = Color.White.copy(alpha = 0.55f),
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                    }
+                    CompactRescanChip(
+                        enabled = canScan,
+                        scanning = isScanning,
+                        onClick = { scanner.triggerScan() },
+                    )
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(220.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0xFF0E1218)),
+                    ) {
+                        Image(
+                            bitmap = heatmapBitmap.asImageBitmap(),
+                            contentDescription = "Signal heatmap",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                        // Router pin
+                        Column(
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .offsetRouterPin(),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color(0xEE12151C))
+                                    .border(1.dp, Color(0x4469F0AE), RoundedCornerShape(10.dp))
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Outlined.Wifi,
+                                        contentDescription = null,
+                                        tint = Color(0xFF69F0AE),
+                                        modifier = Modifier.size(14.dp),
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        "Router",
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.SemiBold,
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            mapLabel,
+                            color = Color.White.copy(alpha = 0.65f),
+                            style = MaterialTheme.typography.labelSmall,
+                            modifier = Modifier
+                                .align(Alignment.BottomStart)
+                                .padding(8.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0x99000000))
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column(
+                        modifier = Modifier.width(88.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        HeatLegendDot(Color(0xFF4CAF50), "Strong", "−30 to −60 dBm")
+                        HeatLegendDot(Color(0xFFFFEB3B), "Fair", "−60 to −75 dBm")
+                        HeatLegendDot(Color(0xFFAB47BC), "Weak", "−75 to −90 dBm")
+                        Spacer(modifier = Modifier.weight(1f))
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0xFF161A22))
+                                .border(1.dp, Color(0x22FFFFFF), RoundedCornerShape(10.dp))
+                                .padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "Floor 1",
+                                color = Color.White.copy(alpha = 0.8f),
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    }
+                }
+                if (mappedSamples.size < 5) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Tip: Map a room in AR Scan for a walk-based spatial heatmap. " +
+                            "Showing live radial estimate from current RSSI until then.",
+                        color = Color.White.copy(alpha = 0.5f),
+                        style = MaterialTheme.typography.labelSmall,
+                    )
+                }
+            }
+        }
+
+        // ── Live signal chart ────────────────────────────────────────────
+        AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+            Column {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        "Signal Strength at This Location",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF69F0AE)),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            "Live",
+                            color = Color(0xFF69F0AE),
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(modifier = Modifier.padding(end = 12.dp)) {
+                        Text(
+                            text = if (liveRssi != null) "$liveRssi dBm" else "— dBm",
+                            color = accent,
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            quality,
+                            color = accent,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    LiveRssiChart(
+                        points = history.toList(),
+                        accent = accent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(88.dp),
+                    )
+                }
+            }
+        }
+
+        // ── Recommendations ──────────────────────────────────────────────
+        AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.Lightbulb,
+                        contentDescription = null,
+                        tint = Color(0xFFFFD54F),
+                        modifier = Modifier.size(18.dp),
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        "Recommendations",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                }
+                buildRecommendations(networks, peakRssi).forEach { rec ->
+                    RecommendationRow(
+                        title = rec.title,
+                        body = rec.body,
+                        tint = rec.tint,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompactRescanChip(
+    enabled: Boolean,
+    scanning: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF1B5E20).copy(alpha = if (enabled) 1f else 0.4f))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Refresh,
+            contentDescription = null,
+            tint = Color(0xFF69F0AE),
+            modifier = Modifier.size(14.dp),
+        )
+        Spacer(modifier = Modifier.width(4.dp))
+        Text(
+            if (scanning) "Scanning…" else "Rescan",
+            color = Color(0xFF69F0AE),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun HeatLegendDot(color: Color, title: String, range: String) {
+    Row(verticalAlignment = Alignment.Top) {
+        Box(
+            modifier = Modifier
+                .padding(top = 3.dp)
+                .size(8.dp)
+                .clip(CircleShape)
+                .background(color),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Column {
+            Text(title, color = Color.White, style = MaterialTheme.typography.labelMedium)
             Text(
-                "Spatial heatmap",
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                "Open the AR Scan tab, start a mapping session, and walk the room. " +
-                    "WifiAR builds a floor heatmap from fused RSSI + AR pose. " +
-                    "Use Points / Heatmap / Both to visualize coverage in 3D.",
-                color = Color.White.copy(alpha = 0.7f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            Text(
-                "Green = strong · Yellow = fair · Purple = weak · Red = dead zones.",
-                color = Color(0xFF69F0AE),
-                style = MaterialTheme.typography.labelMedium,
+                range,
+                color = Color.White.copy(alpha = 0.5f),
+                style = MaterialTheme.typography.labelSmall,
             )
         }
+    }
+}
+
+/** Small offset helper so router pin sits cleanly above center. */
+private fun Modifier.offsetRouterPin(): Modifier = this.padding(bottom = 8.dp)
+
+@Composable
+private fun LiveRssiChart(
+    points: List<Pair<Long, Int>>,
+    accent: Color,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(Color(0xFF0E1218))
+            .padding(6.dp),
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val left = 28f
+            val right = size.width - 4f
+            val top = 6f
+            val bottom = size.height - 18f
+            val w = right - left
+            val h = bottom - top
+            // grid
+            listOf(-20, -40, -60, -80, -100).forEach { rssi ->
+                val t = ((rssi + 100f) / 80f).coerceIn(0f, 1f)
+                val y = bottom - t * h
+                drawLine(
+                    Color.White.copy(alpha = 0.06f),
+                    Offset(left, y),
+                    Offset(right, y),
+                    1f,
+                )
+            }
+            if (points.size < 2) return@Canvas
+            val t0 = points.first().first
+            val t1 = points.last().first.coerceAtLeast(t0 + 1)
+            val path = Path()
+            points.forEachIndexed { i, (ts, rssi) ->
+                val x = left + ((ts - t0).toFloat() / (t1 - t0)) * w
+                val y = bottom - (((rssi + 100f) / 80f).coerceIn(0f, 1f)) * h
+                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+            }
+            val fill = Path().apply {
+                addPath(path)
+                lineTo(right, bottom)
+                lineTo(left, bottom)
+                close()
+            }
+            drawPath(
+                fill,
+                Brush.verticalGradient(
+                    listOf(accent.copy(alpha = 0.35f), accent.copy(alpha = 0.02f)),
+                ),
+            )
+            drawPath(path, accent, style = Stroke(3f, cap = StrokeCap.Round))
+        }
+        Row(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Text("−60s", color = Color.White.copy(alpha = 0.4f), style = MaterialTheme.typography.labelSmall)
+            Text("Now", color = Color.White.copy(alpha = 0.4f), style = MaterialTheme.typography.labelSmall)
+        }
+    }
+}
+
+@Composable
+private fun RecommendationRow(
+    title: String,
+    body: String,
+    tint: Color,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF12161E))
+            .border(1.dp, Color(0x18FFFFFF), RoundedCornerShape(12.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(tint.copy(alpha = 0.18f)),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Outlined.Wifi, contentDescription = null, tint = tint, modifier = Modifier.size(18.dp))
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(title, color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(body, color = Color.White.copy(alpha = 0.55f), style = MaterialTheme.typography.labelSmall)
+        }
+        Icon(
+            Icons.AutoMirrored.Outlined.KeyboardArrowRight,
+            contentDescription = null,
+            tint = Color.White.copy(alpha = 0.3f),
+        )
+    }
+}
+
+private data class Rec(val title: String, val body: String, val tint: Color)
+
+private fun buildRecommendations(networks: List<RssiSample>, peakRssi: Int): List<Rec> {
+    val list = ArrayList<Rec>(3)
+    if (peakRssi < -65) {
+        list.add(
+            Rec(
+                "Move your router to a more central location",
+                "This can help improve overall coverage.",
+                Color(0xFF42A5F5),
+            ),
+        )
+    } else {
+        list.add(
+            Rec(
+                "Keep the router elevated and unobstructed",
+                "Avoid cabinets and thick walls near the AP.",
+                Color(0xFF42A5F5),
+            ),
+        )
+    }
+    list.add(
+        Rec(
+            "Consider upgrading your router",
+            "A dual-band or Wi‑Fi 6 router can provide better performance.",
+            Color(0xFFFFA726),
+        ),
+    )
+    val ch24 = networks
+        .filter { WifiChannelUtils.bandOf(it.frequencyMhz) == WifiChannelUtils.Band.BAND_2_4 }
+        .map { WifiChannelUtils.channelOf(it.frequencyMhz) }
+    val crowded = ch24.groupingBy { it }.eachCount().any { it.value >= 3 }
+    list.add(
+        Rec(
+            if (crowded) "Use less congested channels" else "Prefer channels 1, 6, or 11",
+            "Try channels 1, 6 or 11 for 2.4 GHz band.",
+            Color(0xFFAB47BC),
+        ),
+    )
+    return list
+}
+
+/** Radial heatmap from a single peak RSSI (live mode). */
+private fun buildRadialHeatmapBitmap(peakRssi: Int, sizePx: Int): Bitmap {
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    val canvas = AndroidCanvas(bmp)
+    val cx = sizePx / 2f
+    val cy = sizePx / 2f
+    // Multi-stop radial: strong center → fair → weak edges
+    val strength = ((peakRssi + 100f) / 70f).coerceIn(0.2f, 1f)
+    val colors = intArrayOf(
+        android.graphics.Color.argb(230, 0x4C, 0xAF, 0x50), // green
+        android.graphics.Color.argb(200, 0xFF, 0xEB, 0x3B), // yellow
+        android.graphics.Color.argb(210, 0xAB, 0x47, 0xBC), // purple
+        android.graphics.Color.argb(220, 0x6A, 0x1B, 0x9A),
+    )
+    val stops = floatArrayOf(0f, 0.35f * strength, 0.7f, 1f)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        shader = RadialGradient(cx, cy, sizePx * 0.62f, colors, stops, Shader.TileMode.CLAMP)
+    }
+    canvas.drawRect(0f, 0f, sizePx.toFloat(), sizePx.toFloat(), paint)
+    // Soft room grid overlay
+    val grid = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = android.graphics.Color.argb(40, 255, 255, 255)
+        strokeWidth = 2f
+        style = Paint.Style.STROKE
+    }
+    val step = sizePx / 6f
+    for (i in 1 until 6) {
+        canvas.drawLine(i * step, 0f, i * step, sizePx.toFloat(), grid)
+        canvas.drawLine(0f, i * step, sizePx.toFloat(), i * step, grid)
+    }
+    return bmp
+}
+
+/** Spatial IDW-style heatmap from mapped session samples. */
+private fun buildSpatialHeatmapBitmap(samples: List<RssiSampleEntity>, sizePx: Int): Bitmap {
+    val bmp = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+    var minX = Float.POSITIVE_INFINITY
+    var maxX = Float.NEGATIVE_INFINITY
+    var minZ = Float.POSITIVE_INFINITY
+    var maxZ = Float.NEGATIVE_INFINITY
+    for (s in samples) {
+        if (s.poseX < minX) minX = s.poseX
+        if (s.poseX > maxX) maxX = s.poseX
+        if (s.poseZ < minZ) minZ = s.poseZ
+        if (s.poseZ > maxZ) maxZ = s.poseZ
+    }
+    val pad = 0.4f
+    minX -= pad
+    maxX += pad
+    minZ -= pad
+    maxZ += pad
+    if (maxX - minX < 1f) {
+        val m = (minX + maxX) / 2f
+        minX = m - 0.5f
+        maxX = m + 0.5f
+    }
+    if (maxZ - minZ < 1f) {
+        val m = (minZ + maxZ) / 2f
+        minZ = m - 0.5f
+        maxZ = m + 0.5f
+    }
+    val pixels = IntArray(sizePx * sizePx)
+    val power = 2.0
+    val eps = 1e-4
+    for (py in 0 until sizePx) {
+        val z = minZ + (1f - (py + 0.5f) / sizePx) * (maxZ - minZ)
+        for (px in 0 until sizePx) {
+            val x = minX + ((px + 0.5f) / sizePx) * (maxX - minX)
+            var num = 0.0
+            var den = 0.0
+            for (s in samples) {
+                val d = hypot((x - s.poseX).toDouble(), (z - s.poseZ).toDouble())
+                val w = 1.0 / (d.pow(power) + eps)
+                num += w * s.rssiDbm
+                den += w
+            }
+            val rssi = if (den > 0) (num / den).toFloat() else -90f
+            pixels[py * sizePx + px] = rssiToHeatArgb(rssi)
+        }
+    }
+    bmp.setPixels(pixels, 0, sizePx, 0, 0, sizePx, sizePx)
+    return bmp
+}
+
+private fun rssiToHeatArgb(rssi: Float): Int {
+    // green ≥ −60, yellow −60…−75, purple ≤ −75
+    val a = 210
+    return when {
+        rssi >= -50f -> android.graphics.Color.argb(a, 0x2E, 0x7D, 0x32)
+        rssi >= -60f -> android.graphics.Color.argb(a, 0x4C, 0xAF, 0x50)
+        rssi >= -68f -> android.graphics.Color.argb(a, 0xFF, 0xEB, 0x3B)
+        rssi >= -75f -> android.graphics.Color.argb(a, 0xFF, 0xA0, 0x00)
+        rssi >= -85f -> android.graphics.Color.argb(a, 0xAB, 0x47, 0xBC)
+        else -> android.graphics.Color.argb(a, 0x6A, 0x1B, 0x9A)
     }
 }
