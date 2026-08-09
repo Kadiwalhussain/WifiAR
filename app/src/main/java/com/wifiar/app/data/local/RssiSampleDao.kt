@@ -29,4 +29,37 @@ interface RssiSampleDao {
 
     @Query("SELECT COUNT(*) FROM rssi_samples WHERE sessionId = :sessionId")
     suspend fun countForSession(sessionId: String): Int
+
+    /** Samples in a time window (history chart / summary). */
+    @Query(
+        """
+        SELECT * FROM rssi_samples
+        WHERE timestampMs >= :sinceMs
+        ORDER BY timestampMs ASC
+        """,
+    )
+    suspend fun getSince(sinceMs: Long): List<RssiSampleEntity>
+
+    @Query(
+        """
+        SELECT * FROM rssi_samples
+        WHERE sessionId IN (:sessionIds)
+        ORDER BY timestampMs ASC
+        """,
+    )
+    suspend fun getForSessions(sessionIds: List<String>): List<RssiSampleEntity>
+
+    @Query("SELECT MAX(rssiDbm) FROM rssi_samples WHERE sessionId = :sessionId")
+    suspend fun maxRssiForSession(sessionId: String): Int?
+
+    @Query(
+        """
+        SELECT ssid FROM rssi_samples
+        WHERE sessionId = :sessionId AND ssid != ''
+        GROUP BY ssid
+        ORDER BY COUNT(*) DESC
+        LIMIT 1
+        """,
+    )
+    suspend fun dominantSsidForSession(sessionId: String): String?
 }

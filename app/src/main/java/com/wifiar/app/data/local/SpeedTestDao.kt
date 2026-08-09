@@ -26,4 +26,19 @@ interface SpeedTestDao {
 
     @Query("SELECT COUNT(*) FROM speed_tests WHERE sessionId = :sessionId")
     suspend fun countForSession(sessionId: String): Int
+
+    @Query("SELECT * FROM speed_tests ORDER BY timestampMs DESC LIMIT 200")
+    fun observeAllRecent(): Flow<List<SpeedTestEntity>>
+
+    @Query(
+        """
+        SELECT * FROM speed_tests
+        WHERE timestampMs >= :sinceMs
+        ORDER BY timestampMs DESC
+        """,
+    )
+    suspend fun getSince(sinceMs: Long): List<SpeedTestEntity>
+
+    @Query("SELECT MAX(downloadMbps) FROM speed_tests WHERE timestampMs >= :sinceMs")
+    suspend fun maxDownloadSince(sinceMs: Long): Float?
 }
