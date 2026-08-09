@@ -24,18 +24,27 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import android.widget.Toast
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.outlined.AccessTime
+import androidx.compose.material.icons.outlined.CalendarMonth
 import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
+import androidx.compose.material.icons.outlined.MoreVert
+import androidx.compose.material.icons.outlined.NetworkCheck
 import androidx.compose.material.icons.outlined.Speed
-import androidx.compose.material.icons.outlined.Timeline
+import androidx.compose.material.icons.outlined.Upload
 import androidx.compose.material.icons.outlined.Wifi
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -43,6 +52,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -196,6 +206,10 @@ fun SessionHistoryScreen(
 
     var tab by remember { mutableStateOf(HistoryTab.SCAN) }
     var chartRange by remember { mutableStateOf(ChartRange.D7) }
+    var summaryRange by remember { mutableStateOf(ChartRange.D7) }
+    var showAllScans by remember { mutableStateOf(false) }
+    var showRangePicker by remember { mutableStateOf(false) }
+    var menuOpen by remember { mutableStateOf(false) }
     var scanRows by remember { mutableStateOf<List<ScanRowUi>>(emptyList()) }
     var chartSeries by remember { mutableStateOf<List<ChartSeries>>(emptyList()) }
     var bestSignal by remember { mutableStateOf<Int?>(null) }
@@ -204,21 +218,27 @@ fun SessionHistoryScreen(
     var loadingChart by remember { mutableStateOf(false) }
 
     // Enrich sessions + load chart when range / data changes
-    LaunchedEffect(summaries, chartRange, allSpeeds) {
+    LaunchedEffect(summaries, chartRange, summaryRange, allSpeeds) {
         loadingChart = true
-        val since = System.currentTimeMillis() - chartRange.days * 24L * 60L * 60L * 1000L
+        val chartSince = System.currentTimeMillis() - chartRange.days * 24L * 60L * 60L * 1000L
+        val summarySince = System.currentTimeMillis() - summaryRange.days * 24L * 60L * 60L * 1000L
         val result = withContext(Dispatchers.IO) {
             val rows = summaries.map { s ->
                 val best = db.rssiSampleDao().maxRssiForSession(s.sessionId)
                 val ssid = db.rssiSampleDao().dominantSsidForSession(s.sessionId)
                 ScanRowUi(s, best, ssid)
             }
-            val samples = db.rssiSampleDao().getSince(since)
+            val samples = db.rssiSampleDao().getSince(chartSince)
             val series = buildChartSeries(samples, chartRange.days)
-            val peakRssi = samples.maxOfOrNull { it.rssiDbm }
-            val peakDl = db.speedTestDao().maxDownloadSince(since)
+            val summarySamples = if (chartRange == summaryRange) {
+                samples
+            } else {
+                db.rssiSampleDao().getSince(summarySince)
+            }
+            val peakRssi = summarySamples.maxOfOrNull { it.rssiDbm }
+            val peakDl = db.speedTestDao().maxDownloadSince(summarySince)
             val duration = summaries
-                .filter { it.startTimeMs >= since }
+                .filter { it.startTimeMs >= summarySince }
                 .sumOf { s ->
                     val end = s.endTimeMs ?: System.currentTimeMillis()
                     (end - s.startTimeMs).coerceAtLeast(0L)
@@ -233,9 +253,31 @@ fun SessionHistoryScreen(
         loadingChart = false
     }
 
-    val scansInRange = remember(summaries, chartRange) {
-        val since = System.currentTimeMillis() - chartRange.days * 24L * 60L * 60L * 1000L
+    val scansInRange = remember(summaries, summaryRange) {
+        val since = System.currentTimeMillis() - summaryRange.days * 24L * 60L * 60L * 1000L
         summaries.count { it.startTimeMs >= since }
+    }
+
+    val visibleScans = remember(scanRows, showAllScans) {
+        if (showAllScans) scanRows else scanRows.take(4)
+    }
+
+    val speedsInRange = remember(allSpeeds, summaryRange) {
+        val since = System.currentTimeMillis() - summaryRange.days * 24L * 60L * 60L * 1000L
+        allSpeeds.filter { it.timestampMs >= since }
+    }
+
+    if (showRangePicker) {
+        RangePickerDialog(
+            title = "Scan Summary Range",
+            current = summaryRange,
+            onDismiss = { showRangePicker = false },
+            onPick = {
+                summaryRange = it
+                chartRange = it
+                showRangePicker = false
+            },
+        )
     }
 
     Scaffold(
@@ -255,6 +297,48 @@ fun SessionHistoryScreen(
                             color = Color.White.copy(alpha = 0.55f),
                             style = MaterialTheme.typography.labelMedium,
                         )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = { showRangePicker = true }) {
+                        Icon(
+                            Icons.Outlined.CalendarMonth,
+                            contentDescription = "Date range",
+                            tint = Color.White.copy(alpha = 0.75f),
+                        )
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(
+                                Icons.Outlined.MoreVert,
+                                contentDescription = "More",
+                                tint = Color.White.copy(alpha = 0.75f),
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = menuOpen,
+                            onDismissRequest = { menuOpen = false },
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Refresh stats") },
+                                onClick = {
+                                    menuOpen = false
+                                    // Re-trigger by toggling range briefly is heavy; just toast
+                                    Toast.makeText(context, "Stats refresh on next data change", Toast.LENGTH_SHORT).show()
+                                },
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Export tip") },
+                                onClick = {
+                                    menuOpen = false
+                                    Toast.makeText(
+                                        context,
+                                        "Open a scan, or use Settings → Export Scan History",
+                                        Toast.LENGTH_LONG,
+                                    ).show()
+                                },
+                            )
+                        }
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Bg),
@@ -280,7 +364,8 @@ fun SessionHistoryScreen(
                             bestSignal = bestSignal,
                             bestDownload = bestDownload,
                             totalScanMs = totalScanMs,
-                            rangeLabel = "Last ${chartRange.days} Days",
+                            range = summaryRange,
+                            onRangeClick = { showRangePicker = true },
                         )
                     }
                     item {
@@ -293,18 +378,20 @@ fun SessionHistoryScreen(
                     }
                     item {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showAllScans = !showAllScans },
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "Recent Scans",
+                                if (showAllScans) "All Scans" else "Recent Scans",
                                 color = Color.White,
                                 fontWeight = FontWeight.SemiBold,
                                 style = MaterialTheme.typography.titleSmall,
                                 modifier = Modifier.weight(1f),
                             )
                             Text(
-                                "All Scans",
+                                if (showAllScans) "Show less" else "All Scans",
                                 color = AccentGreen,
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Medium,
@@ -321,11 +408,12 @@ fun SessionHistoryScreen(
                         item {
                             EmptyHistoryHint(
                                 title = "No scan history yet",
-                                body = "Walk a room in AR Scan to create mapping sessions.",
+                                body = "Walk a room in AR Scan to create mapping sessions. " +
+                                    "Summary cards, charts, and recent scans fill in from real data.",
                             )
                         }
                     } else {
-                        items(scanRows, key = { it.summary.sessionId }) { row ->
+                        items(visibleScans, key = { it.summary.sessionId }) { row ->
                             RecentScanCard(
                                 row = row,
                                 onClick = { selectedSessionId = row.summary.sessionId },
@@ -336,11 +424,12 @@ fun SessionHistoryScreen(
 
                 HistoryTab.SPEED -> {
                     item {
-                        Text(
-                            "Speed Test History",
-                            color = Color.White,
-                            fontWeight = FontWeight.SemiBold,
-                            style = MaterialTheme.typography.titleSmall,
+                        SpeedSummarySection(
+                            tests = speedsInRange.size,
+                            bestDownload = speedsInRange.maxOfOrNull { it.downloadMbps },
+                            bestUpload = speedsInRange.maxOfOrNull { it.uploadMbps },
+                            bestPing = speedsInRange.minOfOrNull { it.pingMs },
+                            rangeLabel = "Last ${summaryRange.days} Days",
                         )
                     }
                     if (allSpeeds.isEmpty()) {
@@ -366,6 +455,9 @@ fun SessionHistoryScreen(
                             bestDownload = bestDownload,
                             totalScanMs = totalScanMs,
                             speedCount = allSpeeds.size,
+                            scansInRange = scansInRange,
+                            rangeLabel = "Last ${summaryRange.days} days",
+                            series = chartSeries,
                         )
                     }
                 }
@@ -422,7 +514,7 @@ private fun HistoryTabRow(tab: HistoryTab, onTab: (HistoryTab) -> Unit) {
     ) {
         HistoryTabChip(
             label = "Scan History",
-            icon = Icons.Outlined.Timeline,
+            icon = Icons.Outlined.History,
             selected = tab == HistoryTab.SCAN,
             onClick = { onTab(HistoryTab.SCAN) },
         )
@@ -439,6 +531,43 @@ private fun HistoryTabRow(tab: HistoryTab, onTab: (HistoryTab) -> Unit) {
             onClick = { onTab(HistoryTab.REPORTS) },
         )
     }
+}
+
+@Composable
+private fun RangePickerDialog(
+    title: String,
+    current: ChartRange,
+    onDismiss: () -> Unit,
+    onPick: (ChartRange) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                ChartRange.entries.forEach { r ->
+                    val label = when (r) {
+                        ChartRange.D7 -> "Last 7 Days"
+                        ChartRange.D30 -> "Last 30 Days"
+                        ChartRange.D90 -> "Last 90 Days"
+                    }
+                    Text(
+                        text = if (r == current) "✓ $label" else label,
+                        color = if (r == current) AccentGreen else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onPick(r) }
+                            .padding(vertical = 12.dp),
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = if (r == current) FontWeight.SemiBold else FontWeight.Normal,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("Close") }
+        },
+    )
 }
 
 @Composable
@@ -474,12 +603,88 @@ private fun ScanSummarySection(
     bestSignal: Int?,
     bestDownload: Float?,
     totalScanMs: Long,
+    range: ChartRange,
+    onRangeClick: () -> Unit,
+) {
+    val rangeLabel = when (range) {
+        ChartRange.D7 -> "Last 7 Days"
+        ChartRange.D30 -> "Last 30 Days"
+        ChartRange.D90 -> "Last 90 Days"
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onRangeClick),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Scan Summary",
+                color = Color.White,
+                fontWeight = FontWeight.SemiBold,
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                rangeLabel,
+                color = Color.White.copy(alpha = 0.55f),
+                style = MaterialTheme.typography.labelSmall,
+            )
+            Icon(
+                Icons.Outlined.KeyboardArrowDown,
+                contentDescription = "Change range",
+                tint = Color.White.copy(alpha = 0.55f),
+                modifier = Modifier.size(16.dp),
+            )
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            SummaryStatCard(
+                icon = Icons.Outlined.Wifi,
+                tint = AccentGreen,
+                value = scans.toString(),
+                label = "Scans",
+                modifier = Modifier.weight(1f),
+            )
+            SummaryStatCard(
+                icon = Icons.Outlined.NetworkCheck,
+                tint = AccentBlue,
+                value = bestSignal?.let { "$it dBm" } ?: "—",
+                label = "Best Signal",
+                modifier = Modifier.weight(1f),
+            )
+            SummaryStatCard(
+                icon = Icons.Outlined.Upload,
+                tint = AccentPurple,
+                value = bestDownload?.let { SpeedFormat.formatMbps(it) } ?: "—",
+                label = "Best Download",
+                modifier = Modifier.weight(1f),
+            )
+            SummaryStatCard(
+                icon = Icons.Outlined.AccessTime,
+                tint = AccentOrange,
+                value = formatDuration(totalScanMs),
+                label = "Total Scanning",
+                modifier = Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
+private fun SpeedSummarySection(
+    tests: Int,
+    bestDownload: Float?,
+    bestUpload: Float?,
+    bestPing: Int?,
     rangeLabel: String,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                "Scan Summary",
+                "Speed Summary",
                 color = Color.White,
                 fontWeight = FontWeight.SemiBold,
                 style = MaterialTheme.typography.titleSmall,
@@ -496,31 +701,31 @@ private fun ScanSummarySection(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SummaryStatCard(
-                icon = Icons.Outlined.Wifi,
-                tint = AccentGreen,
-                value = scans.toString(),
-                label = "Scans",
-                modifier = Modifier.weight(1f),
-            )
-            SummaryStatCard(
-                icon = Icons.Outlined.Timeline,
-                tint = AccentBlue,
-                value = bestSignal?.let { "$it dBm" } ?: "—",
-                label = "Best Signal",
-                modifier = Modifier.weight(1f),
-            )
-            SummaryStatCard(
                 icon = Icons.Outlined.Speed,
+                tint = AccentGreen,
+                value = tests.toString(),
+                label = "Tests",
+                modifier = Modifier.weight(1f),
+            )
+            SummaryStatCard(
+                icon = Icons.Outlined.Upload,
                 tint = AccentPurple,
                 value = bestDownload?.let { SpeedFormat.formatMbps(it) } ?: "—",
-                label = "Best Download",
+                label = "Best ↓",
+                modifier = Modifier.weight(1f),
+            )
+            SummaryStatCard(
+                icon = Icons.Outlined.NetworkCheck,
+                tint = AccentBlue,
+                value = bestUpload?.let { SpeedFormat.formatMbps(it) } ?: "—",
+                label = "Best ↑",
                 modifier = Modifier.weight(1f),
             )
             SummaryStatCard(
                 icon = Icons.Outlined.AccessTime,
                 tint = AccentOrange,
-                value = formatDuration(totalScanMs),
-                label = "Total Scanning",
+                value = bestPing?.let { "${it} ms" } ?: "—",
+                label = "Best Ping",
                 modifier = Modifier.weight(1f),
             )
         }
@@ -827,54 +1032,57 @@ private fun RecentScanCard(row: ScanRowUi, onClick: () -> Unit) {
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
-                    dateText,
+                    dateText + if (summary.endTimeMs == null) " · Live" else "",
                     color = Color.White.copy(alpha = 0.5f),
                     style = MaterialTheme.typography.labelSmall,
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(qColor),
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        rssi?.let { "$it dBm" } ?: "— dBm",
-                        color = qColor,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        quality,
-                        color = qColor.copy(alpha = 0.85f),
-                        style = MaterialTheme.typography.labelSmall,
-                    )
-                }
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Outlined.Wifi,
-                        contentDescription = null,
-                        tint = AccentBlue,
-                        modifier = Modifier.size(12.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        ssid,
-                        color = AccentBlue.copy(alpha = 0.9f),
-                        style = MaterialTheme.typography.labelSmall,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    if (summary.endTimeMs == null) {
-                        Spacer(modifier = Modifier.width(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+                // Mock layout: quality left · network right
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(qColor),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                rssi?.let { "$it dBm" } ?: "— dBm",
+                                color = qColor,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                        }
                         Text(
-                            "In progress",
-                            color = AccentOrange,
+                            quality,
+                            color = qColor.copy(alpha = 0.9f),
                             style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Medium,
+                        )
+                    }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Wifi,
+                            contentDescription = null,
+                            tint = AccentBlue,
+                            modifier = Modifier.size(13.dp),
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            ssid,
+                            color = AccentBlue.copy(alpha = 0.95f),
+                            style = MaterialTheme.typography.labelSmall,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 }
@@ -890,30 +1098,54 @@ private fun RecentScanCard(row: ScanRowUi, onClick: () -> Unit) {
 
 @Composable
 private fun HeatmapThumb(rssi: Int?) {
-    val c1 = when {
-        rssi == null -> Color(0xFF37474F)
-        rssi >= -55 -> AccentGreen
-        rssi >= -70 -> AccentYellow
-        else -> AccentPurple
-    }
-    val c2 = when {
-        rssi == null -> Color(0xFF263238)
-        rssi >= -55 -> Color(0xFF1B5E20)
-        rssi >= -70 -> Color(0xFFE65100)
-        else -> Color(0xFF4A148C)
+    val spots = when {
+        rssi == null -> listOf(Color(0xFF455A64), Color(0xFF37474F))
+        rssi >= -55 -> listOf(AccentGreen, AccentYellow.copy(alpha = 0.7f), AccentPurple.copy(alpha = 0.5f))
+        rssi >= -70 -> listOf(AccentYellow, AccentPurple, AccentGreen.copy(alpha = 0.5f))
+        else -> listOf(AccentPurple, Color(0xFFE53935).copy(alpha = 0.7f), AccentYellow.copy(alpha = 0.4f))
     }
     Box(
         modifier = Modifier
-            .size(56.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(
-                Brush.radialGradient(
-                    colors = listOf(c1.copy(alpha = 0.85f), c2, Color(0xFF12151C)),
-                    radius = 80f,
+            .size(64.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF1A1E26))
+            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(12.dp)),
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            // Soft multi-blob “room heatmap” preview
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(spots[0].copy(alpha = 0.85f), Color.Transparent),
+                    center = Offset(size.width * 0.35f, size.height * 0.4f),
+                    radius = size.minDimension * 0.55f,
                 ),
+                radius = size.minDimension * 0.55f,
+                center = Offset(size.width * 0.35f, size.height * 0.4f),
             )
-            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(10.dp)),
-    )
+            if (spots.size > 1) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(spots[1].copy(alpha = 0.7f), Color.Transparent),
+                        center = Offset(size.width * 0.7f, size.height * 0.55f),
+                        radius = size.minDimension * 0.45f,
+                    ),
+                    radius = size.minDimension * 0.45f,
+                    center = Offset(size.width * 0.7f, size.height * 0.55f),
+                )
+            }
+            if (spots.size > 2) {
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(spots[2].copy(alpha = 0.55f), Color.Transparent),
+                        center = Offset(size.width * 0.55f, size.height * 0.75f),
+                        radius = size.minDimension * 0.35f,
+                    ),
+                    radius = size.minDimension * 0.35f,
+                    center = Offset(size.width * 0.55f, size.height * 0.75f),
+                )
+            }
+        }
+    }
 }
 
 // ── Speed cards ──────────────────────────────────────────────────────────────
@@ -967,30 +1199,76 @@ private fun ReportsTab(
     bestDownload: Float?,
     totalScanMs: Long,
     speedCount: Int,
+    scansInRange: Int,
+    rangeLabel: String,
+    series: List<ChartSeries>,
 ) {
-    AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
-        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "Local Performance Report",
+                    color = Color.White,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+                Text(
+                    "On-device summary · $rangeLabel",
+                    color = Color.White.copy(alpha = 0.55f),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                ReportLine("Sessions in range", scansInRange.toString())
+                ReportLine("All-time sessions", sessionCount.toString())
+                ReportLine("RSSI sample rows", sampleEstimate.toString())
+                ReportLine("Speed tests", speedCount.toString())
+                ReportLine("Best signal", bestSignal?.let { "$it dBm" } ?: "—")
+                ReportLine("Best download", bestDownload?.let { SpeedFormat.formatMbps(it) } ?: "—")
+                ReportLine("Total scan time", formatDuration(totalScanMs))
+            }
+        }
+        if (series.isNotEmpty()) {
+            AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "Top networks in range",
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold,
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                    series.forEach { s ->
+                        val avg = s.points.map { it.second }.average().toInt()
+                        val peak = s.points.maxOfOrNull { it.second }?.toInt()
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(s.color),
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                s.name,
+                                color = Color.White,
+                                style = MaterialTheme.typography.bodySmall,
+                                modifier = Modifier.weight(1f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                "avg $avg · peak ${peak ?: "—"} dBm",
+                                color = s.color,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        AnalyzerCard(modifier = Modifier.fillMaxWidth()) {
             Text(
-                "Local Performance Report",
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(
-                "Generated on-device from your mapping sessions. No cloud account required.",
-                color = Color.White.copy(alpha = 0.55f),
-                style = MaterialTheme.typography.bodySmall,
-            )
-            ReportLine("Total sessions", sessionCount.toString())
-            ReportLine("RSSI samples (listed)", sampleEstimate.toString())
-            ReportLine("Speed tests", speedCount.toString())
-            ReportLine("Best signal", bestSignal?.let { "$it dBm" } ?: "—")
-            ReportLine("Best download", bestDownload?.let { SpeedFormat.formatMbps(it) } ?: "—")
-            ReportLine("Total scan time", formatDuration(totalScanMs))
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                "Tip: Export scan history from Settings to share PNG + CSV heatmaps.",
-                color = AccentGreen.copy(alpha = 0.85f),
+                "Tip: Open any scan for dead-zone analysis, network compare, router placement, " +
+                    "or PNG/CSV export. Settings → Export Scan History shares the latest session.",
+                color = AccentGreen.copy(alpha = 0.9f),
                 style = MaterialTheme.typography.labelSmall,
             )
         }
