@@ -1,6 +1,16 @@
 package com.wifiar.app.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -37,6 +47,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -90,6 +101,7 @@ import com.wifiar.app.util.SpeedFormat
 import io.github.sceneview.ar.ARSceneView
 import io.github.sceneview.math.Direction
 import io.github.sceneview.math.Position
+import io.github.sceneview.math.Scale
 import io.github.sceneview.math.Size
 import io.github.sceneview.rememberOnGestureListener
 import kotlinx.coroutines.Dispatchers
@@ -193,8 +205,8 @@ fun LiveMappingScreen(
 
     var showStartDialog by remember { mutableStateOf(false) }
     var locationName by remember { mutableStateOf("") }
-    // Default HEATMAP only — fewer AR nodes than BOTH (more stable).
-    var viewMode by rememberSaveable { mutableStateOf(MappingViewMode.HEATMAP) }
+    // Both: floor heatmap + floating balls (node count is still capped).
+    var viewMode by rememberSaveable { mutableStateOf(MappingViewMode.BOTH) }
     var heatmapPlane by remember { mutableStateOf<HeatmapPlane?>(null) }
     var deadZones by remember { mutableStateOf<List<DeadZoneRegion>>(emptyList()) }
     var lastComputeMs by remember { mutableStateOf<Long?>(null) }
@@ -459,19 +471,29 @@ fun LiveMappingScreen(
         val pathFloorY = floorYHint + 0.015f
         val ballHeight = pathFloorY + AppConfig.AR_BALL_HEIGHT_ABOVE_FLOOR_M
         val pathPoints = remember(pathSamples, pathFloorY) {
-            buildWalkPathPoints(
+            if (!AppConfig.AR_ENABLE_PATH || AppConfig.AR_MAX_PATH_POINTS <= 0) emptyList()
+            else buildWalkPathPoints(
                 pathSamples.takeLast(AppConfig.AR_MAX_PATH_POINTS),
                 pathFloorY,
             )
         }
-        val labeledIds = remember(pathSamples) {
-            pathSamples.takeLast(AppConfig.AR_MAX_RSSI_LABELS).map { it.id }.toSet()
-        }
         val showSignals = groundReady && activeSession != null
+        val newestBallId = pathSamples.lastOrNull()?.id
+
+        // Gentle pulse only on the newest ball (transform scale — safe).
+        val pulse = rememberInfiniteTransition(label = "newestPulse")
+        val newestPulse by pulse.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.16f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(800, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "pulse",
+        )
 
         ARSceneView(
             modifier = Modifier.fillMaxSize(),
-            // Planes help user understand the ground first; light cost vs hundreds of nodes.
             planeRenderer = true,
             planeFindingMode = Config.PlaneFindingMode.HORIZONTAL,
             sessionConfiguration = { session, config ->
@@ -499,18 +521,21 @@ fun LiveMappingScreen(
             fun unlit(color: Color) = runCatching {
                 loader.createUnlitColorInstance(color)
             }.getOrElse {
-                loader.createColorInstance(color = color, metallic = 0f, roughness = 0.5f)
+                loader.createColorInstance(color = color, metallic = 0f, roughness = 0.42f)
             }
-            val matStrong = remember(loader) { unlit(Color(0xFF66BB6A)) }
+            val matStrong = remember(loader) { unlit(Color(0xFF69F0AE)) }
+            val matStrongGlow = remember(loader) { unlit(Color(0x5569F0AE)) }
             val matMedium = remember(loader) { unlit(Color(0xFFFFEE58)) }
-            val matWeak = remember(loader) { unlit(Color(0xFFFF7043)) }
-            val matDead = remember(loader) { unlit(Color(0xFFE53935)) }
-            val matPath = remember(loader) { unlit(Color(0xFF00E5C3)) }
-            val matRouter = remember(loader) { unlit(Color(0xFFFF6F00)) }
-            val matSpeed = remember(loader) { unlit(Color(0xFF00B8D4)) }
+            val matMediumGlow = remember(loader) { unlit(Color(0x55FFEE58)) }
+            val matWeak = remember(loader) { unlit(Color(0xFFFF8A65)) }
+            val matWeakGlow = remember(loader) { unlit(Color(0x55FF8A65)) }
+            val matDead = remember(loader) { unlit(Color(0xFFEF5350)) }
+            val matDeadGlow = remember(loader) { unlit(Color(0x55EF5350)) }
+            val matPath = remember(loader) { unlit(Color(0xFF18FFFF)) }
+            val matRouter = remember(loader) { unlit(Color(0xFFFFAB40)) }
+            val matSpeed = remember(loader) { unlit(Color(0xFF00E5FF)) }
+            val matSpeedGlow = remember(loader) { unlit(Color(0x5500E5FF)) }
 
-            // Ultra-stable AR: spheres only. No PathNode / TextNode (those crash often).
-            // Labels + speed numbers live in the Compose HUD instead.
             if (showSignals) {
                 if (AppConfig.AR_ENABLE_PATH && pathPoints.size >= 2) {
                     key("walk-path") {
@@ -555,7 +580,7 @@ fun LiveMappingScreen(
                                 radius = AppConfig.DEAD_ZONE_MARKER_RADIUS_M,
                                 position = Position(
                                     x = zone.centroidX.safeCoord(),
-                                    y = (pathFloorY + 0.2f).safeCoord(),
+                                    y = (pathFloorY + 0.22f).safeCoord(),
                                     z = zone.centroidZ.safeCoord(),
                                 ),
                                 materialInstance = matDead,
@@ -568,20 +593,40 @@ fun LiveMappingScreen(
                 if (showRaw) {
                     pathSamples.forEach { sample ->
                         key("b-${sample.id}") {
-                            val mat = when {
-                                sample.rssiDbm >= UserPreferences.rssiStrongDbm -> matStrong
-                                sample.rssiDbm >= UserPreferences.rssiMediumDbm -> matMedium
-                                sample.rssiDbm >= UserPreferences.rssiDeadDbm -> matWeak
-                                else -> matDead
+                            val (coreMat, glowMat) = when {
+                                sample.rssiDbm >= UserPreferences.rssiStrongDbm ->
+                                    matStrong to matStrongGlow
+                                sample.rssiDbm >= UserPreferences.rssiMediumDbm ->
+                                    matMedium to matMediumGlow
+                                sample.rssiDbm >= UserPreferences.rssiDeadDbm ->
+                                    matWeak to matWeakGlow
+                                else -> matDead to matDeadGlow
+                            }
+                            val x = sample.poseX.safeCoord()
+                            val z = sample.poseZ.safeCoord()
+                            val y = ballHeight.safeCoord(1.05f)
+                            val pop = rememberPopInScale(sample.id)
+                            val s = if (sample.id == newestBallId) {
+                                pop * newestPulse
+                            } else {
+                                pop
+                            }.coerceIn(0.1f, 1.3f)
+                            val scale = Scale(s)
+                            val pos = Position(x = x, y = y, z = z)
+                            val r = AppConfig.SAMPLE_SPHERE_RADIUS_M
+                            if (AppConfig.AR_ENABLE_BALL_GLOW) {
+                                SphereNode(
+                                    radius = r * AppConfig.SAMPLE_GLOW_SCALE,
+                                    position = pos,
+                                    scale = scale,
+                                    materialInstance = glowMat,
+                                )
                             }
                             SphereNode(
-                                radius = AppConfig.SAMPLE_SPHERE_RADIUS_M,
-                                position = Position(
-                                    x = sample.poseX.safeCoord(),
-                                    y = ballHeight.safeCoord(1.0f),
-                                    z = sample.poseZ.safeCoord(),
-                                ),
-                                materialInstance = mat,
+                                radius = r,
+                                position = pos,
+                                scale = scale,
+                                materialInstance = coreMat,
                             )
                         }
                     }
@@ -601,16 +646,21 @@ fun LiveMappingScreen(
                     }
                 }
 
-                // Speed: sphere only — Mbps shown in HUD banner after test
-                speedTests.take(2).forEach { test ->
+                speedTests.take(3).forEach { test ->
                     key("st-${test.id}") {
+                        val pos = Position(
+                            x = test.poseX.safeCoord(),
+                            y = test.poseY.safeCoord(ballHeight),
+                            z = test.poseZ.safeCoord(),
+                        )
+                        SphereNode(
+                            radius = AppConfig.SPEED_TEST_MARKER_RADIUS_M * 1.4f,
+                            position = pos,
+                            materialInstance = matSpeedGlow,
+                        )
                         SphereNode(
                             radius = AppConfig.SPEED_TEST_MARKER_RADIUS_M,
-                            position = Position(
-                                x = test.poseX.safeCoord(),
-                                y = test.poseY.safeCoord(ballHeight),
-                                z = test.poseZ.safeCoord(),
-                            ),
+                            position = pos,
                             materialInstance = matSpeed,
                             apply = { name = "$SPEED_TEST_NODE_PREFIX${test.id}" },
                         )
@@ -1494,5 +1544,28 @@ private fun rssiTierColor(rssiDbm: Int): Color {
 /** Guard NaN/Inf positions that crash Filament transforms. */
 private fun Float.safeCoord(fallback: Float = 0f): Float {
     return if (isFinite()) this else fallback
+}
+
+/**
+ * One-shot bouncy pop-in for a signal ball.
+ * Uses [Animatable] so Compose drives [Scale] updates (transform only — not geometry).
+ */
+@Composable
+private fun rememberPopInScale(sampleId: Long): Float {
+    if (!AppConfig.AR_ENABLE_BALL_POP_IN) return 1f
+    val anim = remember(sampleId) { Animatable(0.12f) }
+    LaunchedEffect(sampleId) {
+        runCatching {
+            anim.snapTo(0.12f)
+            anim.animateTo(
+                targetValue = 1f,
+                animationSpec = spring(
+                    dampingRatio = 0.58f,
+                    stiffness = Spring.StiffnessMediumLow,
+                ),
+            )
+        }
+    }
+    return anim.value
 }
 

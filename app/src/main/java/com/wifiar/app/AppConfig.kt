@@ -22,29 +22,35 @@ object AppConfig {
     /** How high above the floor plane to float dead-zone labels (metres). */
     const val DEAD_ZONE_LABEL_HEIGHT_M: Float = 0.28f
 
-    /** RSSI ball radius (metres). */
-    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.08f
+    /** RSSI ball core radius (metres). */
+    const val SAMPLE_SPHERE_RADIUS_M: Float = 0.10f
+
+    /** Soft outer shell multiplier (static glow — no extra animation). */
+    const val SAMPLE_GLOW_SCALE: Float = 1.45f
 
     /**
-     * Hard cap on AR sample spheres — keep very low to avoid Filament OOM/crashes.
-     * PathNode / TextNode are disabled in Live Mapping for the same reason.
+     * Cap AR sample *positions* (each may use core + glow = 2 spheres).
+     * Keep modest so Filament stays healthy.
      */
-    const val AR_MAX_SAMPLE_SPHERES: Int = 12
+    const val AR_MAX_SAMPLE_SPHERES: Int = 16
 
-    /** Max RSSI labels in AR (0 = labels only in HUD — safest). */
-    const val AR_MAX_RSSI_LABELS: Int = 0
-
-    /** Max walk-path points (path drawing is optional / off by default for stability). */
-    const val AR_MAX_PATH_POINTS: Int = 0
+    /** Max walk-path polyline points (light PathNode). */
+    const val AR_MAX_PATH_POINTS: Int = 20
 
     /** How high above estimated floor to float signal balls (metres). */
-    const val AR_BALL_HEIGHT_ABOVE_FLOOR_M: Float = 1.0f
+    const val AR_BALL_HEIGHT_ABOVE_FLOOR_M: Float = 1.05f
 
-    /** Draw floor path polyline (can crash some GPUs — keep false for stability). */
-    const val AR_ENABLE_PATH: Boolean = false
+    /** Cyan floor trail of the walk. */
+    const val AR_ENABLE_PATH: Boolean = true
 
-    /** Draw AR TextNode labels (bitmap textures — heavy/crashy; keep false). */
-    const val AR_ENABLE_TEXT_LABELS: Boolean = false
+    /** Dual-layer glow shells around signal balls. */
+    const val AR_ENABLE_BALL_GLOW: Boolean = true
+
+    /**
+     * Pop-in scale animation for new balls (uses SphereNode.scale only —
+     * transform update, not geometry rebuild → safe).
+     */
+    const val AR_ENABLE_BALL_POP_IN: Boolean = true
 
     // ── Speed test (Part 6) ──────────────────────────────────────────────────
 
