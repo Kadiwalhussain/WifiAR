@@ -40,6 +40,10 @@ interface RssiSampleDao {
     )
     suspend fun getSince(sinceMs: Long): List<RssiSampleEntity>
 
+    /**
+     * Samples for many sessions. **Never call with an empty list** — Room emits
+     * invalid `IN ()` SQL. Prefer [getForSessionsSafe].
+     */
     @Query(
         """
         SELECT * FROM rssi_samples
@@ -48,6 +52,11 @@ interface RssiSampleDao {
         """,
     )
     suspend fun getForSessions(sessionIds: List<String>): List<RssiSampleEntity>
+
+    suspend fun getForSessionsSafe(sessionIds: List<String>): List<RssiSampleEntity> {
+        if (sessionIds.isEmpty()) return emptyList()
+        return getForSessions(sessionIds)
+    }
 
     @Query("SELECT MAX(rssiDbm) FROM rssi_samples WHERE sessionId = :sessionId")
     suspend fun maxRssiForSession(sessionId: String): Int?

@@ -915,11 +915,13 @@ private fun HeatmapInsightsSection(
             history.removeAt(0)
         }
     }
-    // Also tick every second so chart animates even if RSSI unchanged
-    LaunchedEffect(Unit) {
+    // Also tick every second so chart animates even if RSSI unchanged.
+    // Re-read live value from networks each tick (do not capture a stale Int?).
+    LaunchedEffect(networks, connected.bssid) {
         while (isActive) {
             delay(1_000)
-            val r = liveRssi
+            val r = networks.firstOrNull { it.bssid.equals(connected.bssid, true) }?.rssiDbm
+                ?: networks.maxByOrNull { it.rssiDbm }?.rssiDbm
             if (r != null) {
                 val now = System.currentTimeMillis()
                 history.add(now to r)

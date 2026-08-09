@@ -334,15 +334,19 @@ fun LiveMappingScreen(
         }
     }
 
-    LaunchedEffect(isFusing) {
+    LaunchedEffect(isFusing, networkTick) {
         if (!isFusing) return@LaunchedEffect
         while (isActive) {
-            val cd = wifiScanner.cooldownSeconds.value
-            val scanning = wifiScanner.isScanning.value
-            if (cd == 0L && !scanning) {
-                wifiScanner.triggerScan()
+            val auto = UserPreferences.autoScan
+            val intervalMs = (UserPreferences.scanIntervalSec.coerceIn(2, 120) * 1_000L)
+            if (auto) {
+                val cd = wifiScanner.cooldownSeconds.value
+                val scanning = wifiScanner.isScanning.value
+                if (cd == 0L && !scanning) {
+                    wifiScanner.triggerScan()
+                }
             }
-            delay(1_000L)
+            delay(intervalMs.coerceAtLeast(1_000L))
         }
     }
 
@@ -411,7 +415,11 @@ fun LiveMappingScreen(
             }.getOrNull()
             when (result) {
                 is CloudAnchorManager.ResolveResult.Success -> {
-                    arSessionManager.resetOrigin()
+                    // Align mapping origin to the hosted world pose (not camera).
+                    runCatching {
+                        val t = result.anchor.pose.translation
+                        arSessionManager.setWorldOrigin(t[0], t[1], t[2])
+                    }
                     cloudStatus = context.getString(R.string.cloud_resume_ok)
                     runCatching { result.anchor.detach() }
                 }
@@ -706,25 +714,31 @@ fun LiveMappingScreen(
                     }
                 }
 
-                RecommendationCache.topPosition?.let { rec ->
-                    key("router-rec") {
-                        SphereNode(
-                            radius = AppConfig.ROUTER_MARKER_RADIUS_M,
-                            position = Position(
-                                x = rec.x.safeCoord(),
-                                y = rec.y.safeCoord(ballHeight),
-                                z = rec.z.safeCoord(),
-                            ),
-                            materialInstance = matRouter,
-                        )
+                val recSession = activeSession?.sessionId
+                if (recSession != null &&
+                    RecommendationCache.lastSessionId == recSession
+                ) {
+                    RecommendationCache.topPosition?.let { rec ->
+                        key("router-rec") {
+                            SphereNode(
+                                radius = AppConfig.ROUTER_MARKER_RADIUS_M,
+                                position = Position(
+                                    x = rec.x.safeCoord(),
+                                    y = ballHeight.safeCoord(),
+                                    z = rec.z.safeCoord(),
+                                ),
+                                materialInstance = matRouter,
+                            )
+                        }
                     }
                 }
 
                 speedTests.take(3).forEach { test ->
                     key("st-${test.id}") {
+                        // Float speed markers near ball height (not raw camera Y).
                         val pos = Position(
                             x = test.poseX.safeCoord(),
-                            y = test.poseY.safeCoord(ballHeight),
+                            y = ballHeight.safeCoord(),
                             z = test.poseZ.safeCoord(),
                         )
                         SphereNode(
@@ -953,9 +967,11 @@ fun LiveMappingScreen(
                                     val hostResult = withTimeoutOrNull(
                                         AppConfig.CLOUD_ANCHOR_TIMEOUT_SEC * 1_000,
                                     ) {
-                                        val p = pose
+                                        // Host at mapping origin in ARCore world space
+                                        // (samples are stored relative to this origin).
+                                        val o = arSessionManager.worldOriginTranslation()
                                         val arPose = com.google.ar.core.Pose.makeTranslation(
-                                            p.x, p.y, p.z,
+                                            o[0], o[1], o[2],
                                         )
                                         val local = cloudAnchors.createLocalAnchor(sess, arPose)
                                         if (local == null) {
@@ -1049,8 +1065,9 @@ private fun downsampleSamplesForAr(
     val best = LinkedHashMap<Long, RssiSampleEntity>(samples.size.coerceAtMost(512))
     for (s in samples) {
         if (!s.poseX.isFinite() || !s.poseZ.isFinite()) continue
-        val cx = (s.poseX / cell).toInt()
-        val cz = (s.poseZ / cell).toInt()
+        // floor toward -∞ so cells near origin are not biased by truncate-to-zero
+        val cx = kotlin.math.floor(s.poseX / cell).toInt()
+        val cz = kotlin.math.floor(s.poseZ / cell).toInt()
         val key = (cx.toLong() shl 32) xor (cz.toLong() and 0xffffffffL)
         val prev = best[key]
         if (prev == null || s.rssiDbm > prev.rssiDbm ||

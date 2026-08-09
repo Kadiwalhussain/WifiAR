@@ -193,16 +193,35 @@ class ARSessionManager {
      * (Compose `key`) and call [close] + re-bind lifecycle.
      */
     fun resetOrigin() {
-        originX = lastAbsX
-        originY = lastAbsY
-        originZ = lastAbsZ
+        setWorldOrigin(lastAbsX, lastAbsY, lastAbsZ)
+        Log.d(TAG, "Origin reset at ($originX, $originY, $originZ)")
+    }
+
+    /**
+     * ARCore world-space position of the mapping origin (where relative pose is 0).
+     * Use this when hosting a Cloud Anchor so multi-day resolve can re-align samples.
+     */
+    fun worldOriginTranslation(): FloatArray = floatArrayOf(originX, originY, originZ)
+
+    /** Last camera translation in ARCore world space (before origin subtract). */
+    fun absoluteCameraTranslation(): FloatArray = floatArrayOf(lastAbsX, lastAbsY, lastAbsZ)
+
+    /**
+     * Set the mapping origin to an absolute ARCore world translation
+     * (e.g. after resolving a Cloud Anchor). Relative [pose] is recomputed from
+     * the last known camera absolute position.
+     */
+    fun setWorldOrigin(worldX: Float, worldY: Float, worldZ: Float) {
+        originX = worldX
+        originY = worldY
+        originZ = worldZ
         _pose.value = Pose3D(
-            x = 0f,
-            y = 0f,
-            z = 0f,
+            x = lastAbsX - originX,
+            y = lastAbsY - originY,
+            z = lastAbsZ - originZ,
             timestampMs = System.currentTimeMillis(),
         )
-        Log.d(TAG, "Origin reset at ($originX, $originY, $originZ)")
+        Log.d(TAG, "World origin set to ($originX, $originY, $originZ)")
     }
 
     /**

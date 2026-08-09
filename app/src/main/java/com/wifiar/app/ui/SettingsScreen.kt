@@ -65,6 +65,7 @@ import com.wifiar.app.data.UserPreferences
 import com.wifiar.app.data.export.HeatmapExporter
 import com.wifiar.app.data.local.WifiArDatabase
 import com.wifiar.app.ui.components.AnalyzerCard
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -126,9 +127,11 @@ fun SettingsScreen(
                 scope.launch {
                     withContext(Dispatchers.IO) {
                         runCatching {
-                            db.speedTestDao().deleteAll()
-                            db.rssiSampleDao().deleteAll()
-                            db.mappingSessionDao().deleteAll()
+                            db.withTransaction {
+                                db.speedTestDao().deleteAll()
+                                db.rssiSampleDao().deleteAll()
+                                db.mappingSessionDao().deleteAll()
+                            }
                         }
                     }
                     statusMsg = "Scan history cleared"
