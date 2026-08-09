@@ -121,7 +121,7 @@ fun AppShell(
                 }
                 AppTab.NETWORKS -> {
                     PermissionGate {
-                        ScannerDebugScreen(modifier = Modifier.fillMaxSize())
+                        NetworkInsightsScreen(modifier = Modifier.fillMaxSize())
                     }
                 }
                 AppTab.SPEED -> {
