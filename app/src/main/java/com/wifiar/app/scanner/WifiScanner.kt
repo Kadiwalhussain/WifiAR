@@ -56,6 +56,50 @@ class WifiScanner(
     private val _lastError = MutableStateFlow<String?>(null)
     val lastError: StateFlow<String?> = _lastError.asStateFlow()
 
+    /**
+     * Connected network summary for the analyzer HUD (SSID + link IP when available).
+     * Best-effort; Android may blank SSID without location permission.
+     */
+    data class ConnectedNetwork(
+        val ssid: String,
+        val bssid: String,
+        val ipAddress: String,
+        val connected: Boolean,
+    )
+
+    fun connectedNetwork(): ConnectedNetwork {
+        return runCatching {
+            @Suppress("DEPRECATION")
+            val info = wifiManager.connectionInfo
+            val rawSsid = info?.ssid
+                ?.removePrefix("\"")
+                ?.removeSuffix("\"")
+                .orEmpty()
+            val ssid = when {
+                rawSsid.isBlank() || rawSsid == "<unknown ssid>" -> "Unknown network"
+                else -> rawSsid
+            }
+            val bssid = info?.bssid.orEmpty()
+            @Suppress("DEPRECATION")
+            val ipInt = info?.ipAddress ?: 0
+            val ip = if (ipInt != 0) {
+                String.format(
+                    "%d.%d.%d.%d",
+                    ipInt and 0xff,
+                    ipInt shr 8 and 0xff,
+                    ipInt shr 16 and 0xff,
+                    ipInt shr 24 and 0xff,
+                )
+            } else {
+                "—"
+            }
+            val connected = wifiManager.isWifiEnabled && ipInt != 0
+            ConnectedNetwork(ssid = ssid, bssid = bssid, ipAddress = ip, connected = connected)
+        }.getOrElse {
+            ConnectedNetwork("Wi‑Fi", "", "—", false)
+        }
+    }
+
     private var receiverRegistered = false
     private var cooldownJob: Job? = null
 

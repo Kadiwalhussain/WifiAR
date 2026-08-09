@@ -17,9 +17,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.History
-import androidx.compose.material.icons.outlined.Map
-import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Radar
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,82 +35,74 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.wifiar.app.R
-import com.wifiar.app.ui.auth.AuthScreen
 import com.wifiar.app.ui.theme.GlassStroke
-import com.wifiar.app.ui.theme.NeonCyan
+import com.wifiar.app.ui.theme.NeonMint
 
 enum class AppTab {
-    LIVE_MAPPING,
+    AR_SCAN,
+    NETWORKS,
+    SPEED,
     HISTORY,
-    ACCOUNT,
     SETTINGS,
-    WIFI_DEBUG,
 }
 
 /**
- * Bottom nav shell.
- *
- * Important: **no AnimatedContent** around AR — sliding tab transitions
- * destroy [ARSceneView] mid-frame and cause native Filament/ARCore crashes.
+ * Mock-style bottom navigation (Wi‑Fi AR Analyzer).
+ * No AnimatedContent — AR tab must not be torn down mid-frame.
  */
 @Composable
 fun AppShell(
     modifier: Modifier = Modifier,
 ) {
-    var tab by rememberSaveable { mutableStateOf(AppTab.LIVE_MAPPING) }
+    var tab by rememberSaveable { mutableStateOf(AppTab.AR_SCAN) }
 
     Scaffold(
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.background,
+        containerColor = Color(0xFF0B0D12),
         bottomBar = {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .navigationBarsPadding()
-                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                    .background(Color(0xF012151C))
+                    .border(width = 0.5.dp, color = GlassStroke)
+                    .padding(horizontal = 4.dp, vertical = 6.dp),
             ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.96f))
-                        .border(1.dp, GlassStroke, RoundedCornerShape(18.dp))
-                        .padding(horizontal = 2.dp, vertical = 4.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     NavIconItem(
-                        selected = tab == AppTab.LIVE_MAPPING,
-                        icon = Icons.Outlined.Map,
-                        label = stringResource(R.string.tab_map),
-                        onClick = { tab = AppTab.LIVE_MAPPING },
+                        selected = tab == AppTab.AR_SCAN,
+                        icon = Icons.Outlined.Radar,
+                        label = "AR Scan",
+                        onClick = { tab = AppTab.AR_SCAN },
+                    )
+                    NavIconItem(
+                        selected = tab == AppTab.NETWORKS,
+                        icon = Icons.Outlined.Wifi,
+                        label = "Networks",
+                        onClick = { tab = AppTab.NETWORKS },
+                    )
+                    NavIconItem(
+                        selected = tab == AppTab.SPEED,
+                        icon = Icons.Outlined.Speed,
+                        label = "Speed",
+                        onClick = { tab = AppTab.SPEED },
                     )
                     NavIconItem(
                         selected = tab == AppTab.HISTORY,
                         icon = Icons.Outlined.History,
-                        label = stringResource(R.string.tab_history),
+                        label = "History",
                         onClick = { tab = AppTab.HISTORY },
-                    )
-                    NavIconItem(
-                        selected = tab == AppTab.ACCOUNT,
-                        icon = Icons.Outlined.Person,
-                        label = stringResource(R.string.tab_account),
-                        onClick = { tab = AppTab.ACCOUNT },
                     )
                     NavIconItem(
                         selected = tab == AppTab.SETTINGS,
                         icon = Icons.Outlined.Settings,
-                        label = stringResource(R.string.tab_settings),
+                        label = "Settings",
                         onClick = { tab = AppTab.SETTINGS },
-                    )
-                    NavIconItem(
-                        selected = tab == AppTab.WIFI_DEBUG,
-                        icon = Icons.Outlined.Wifi,
-                        label = stringResource(R.string.tab_wifi),
-                        onClick = { tab = AppTab.WIFI_DEBUG },
                     )
                 }
             }
@@ -122,19 +114,24 @@ fun AppShell(
                 .padding(bottom = innerPadding.calculateBottomPadding()),
         ) {
             when (tab) {
-                AppTab.LIVE_MAPPING -> {
+                AppTab.AR_SCAN -> {
                     PermissionGate {
                         LiveMappingScreen(modifier = Modifier.fillMaxSize())
                     }
                 }
-                AppTab.HISTORY -> SessionHistoryScreen(modifier = Modifier.fillMaxSize())
-                AppTab.ACCOUNT -> AuthScreen(modifier = Modifier.fillMaxSize())
-                AppTab.SETTINGS -> SettingsScreen(modifier = Modifier.fillMaxSize())
-                AppTab.WIFI_DEBUG -> {
+                AppTab.NETWORKS -> {
                     PermissionGate {
                         ScannerDebugScreen(modifier = Modifier.fillMaxSize())
                     }
                 }
+                AppTab.SPEED -> {
+                    PermissionGate {
+                        // Same live map with speed panel focus (session + speed test).
+                        LiveMappingScreen(modifier = Modifier.fillMaxSize())
+                    }
+                }
+                AppTab.HISTORY -> SessionHistoryScreen(modifier = Modifier.fillMaxSize())
+                AppTab.SETTINGS -> SettingsScreen(modifier = Modifier.fillMaxSize())
             }
         }
     }
@@ -147,7 +144,7 @@ private fun RowScope.NavIconItem(
     label: String,
     onClick: () -> Unit,
 ) {
-    val tint = if (selected) NeonCyan else MaterialTheme.colorScheme.onSurfaceVariant
+    val tint = if (selected) NeonMint else Color.White.copy(alpha = 0.45f)
     Column(
         modifier = Modifier
             .weight(1f)
@@ -156,20 +153,12 @@ private fun RowScope.NavIconItem(
             .padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(10.dp))
-                .background(if (selected) NeonCyan.copy(alpha = 0.14f) else Color.Transparent)
-                .padding(horizontal = 10.dp, vertical = 4.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = tint,
-                modifier = Modifier.size(20.dp),
-            )
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = label,
+            tint = tint,
+            modifier = Modifier.size(22.dp),
+        )
         Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = label,

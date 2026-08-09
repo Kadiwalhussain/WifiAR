@@ -23,10 +23,14 @@ val PanelDark = Color(0xE6121A26)
 val PanelLight = Color(0xF2FFFFFF)
 val GlassStroke = Color(0x33FFFFFF)
 
-val RssiStrong = Color(0xFF00C853)
-val RssiMedium = Color(0xFFFFD600)
-val RssiWeak = Color(0xFFFF6D00)
-val RssiDead = Color(0xFFE51C23)
+val RssiStrong = Color(0xFF4CAF50)
+val RssiMedium = Color(0xFFFFEB3B)
+val RssiWeak = Color(0xFFAB47BC) // purple weak (analyzer mock)
+val RssiDead = Color(0xFFE53935)
+
+/** Analyzer mock surfaces */
+val AnalyzerSurface = Color(0xE61C1F26)
+val AnalyzerBar = Color(0xF012151C)
 
 private val DarkColors = darkColorScheme(
     primary = NeonCyan,

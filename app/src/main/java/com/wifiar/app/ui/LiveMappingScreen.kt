@@ -55,6 +55,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -90,9 +91,14 @@ import com.wifiar.app.data.speedtest.SpeedTestManager
 import com.wifiar.app.data.speedtest.SpeedTestOutcome
 import com.wifiar.app.data.sync.SyncManager
 import com.wifiar.app.scanner.WifiScanner
+import com.wifiar.app.ui.components.AnalyzerTopBar
 import com.wifiar.app.ui.components.CompactPrimaryButton
+import com.wifiar.app.ui.components.ConnectedNetworkCard
 import com.wifiar.app.ui.components.GlassPanel
+import com.wifiar.app.ui.components.ScanHintCard
 import com.wifiar.app.ui.components.SegmentedControl
+import com.wifiar.app.ui.components.SignalLegendCard
+import com.wifiar.app.ui.components.SpeedTestPanel
 import com.wifiar.app.ui.components.StatusPill
 import com.wifiar.app.ui.theme.NeonCyan
 import com.wifiar.app.ui.theme.NeonMint
@@ -299,6 +305,16 @@ fun LiveMappingScreen(
     }
 
     var lastSpeedBanner by remember { mutableStateOf<String?>(null) }
+    var lastDownloadMbps by remember { mutableStateOf<Float?>(null) }
+    var lastUploadMbps by remember { mutableStateOf<Float?>(null) }
+    var networkTick by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        while (isActive) {
+            networkTick++
+            delay(3_000)
+        }
+    }
+    val connectedNet = remember(networkTick) { wifiScanner.connectedNetwork() }
 
     /** Cap AR spheres — one ball per spatial cell, stable node count. */
     val arDisplaySamples = remember(samples) {
@@ -523,14 +539,15 @@ fun LiveMappingScreen(
             }.getOrElse {
                 loader.createColorInstance(color = color, metallic = 0f, roughness = 0.42f)
             }
-            val matStrong = remember(loader) { unlit(Color(0xFF69F0AE)) }
-            val matStrongGlow = remember(loader) { unlit(Color(0x5569F0AE)) }
-            val matMedium = remember(loader) { unlit(Color(0xFFFFEE58)) }
-            val matMediumGlow = remember(loader) { unlit(Color(0x55FFEE58)) }
-            val matWeak = remember(loader) { unlit(Color(0xFFFF8A65)) }
-            val matWeakGlow = remember(loader) { unlit(Color(0x55FF8A65)) }
-            val matDead = remember(loader) { unlit(Color(0xFFEF5350)) }
-            val matDeadGlow = remember(loader) { unlit(Color(0x55EF5350)) }
+            // Analyzer mock palette: green / yellow / purple / red
+            val matStrong = remember(loader) { unlit(Color(0xFF4CAF50)) }
+            val matStrongGlow = remember(loader) { unlit(Color(0x554CAF50)) }
+            val matMedium = remember(loader) { unlit(Color(0xFFFFEB3B)) }
+            val matMediumGlow = remember(loader) { unlit(Color(0x55FFEB3B)) }
+            val matWeak = remember(loader) { unlit(Color(0xFFAB47BC)) }
+            val matWeakGlow = remember(loader) { unlit(Color(0x55AB47BC)) }
+            val matDead = remember(loader) { unlit(Color(0xFFE53935)) }
+            val matDeadGlow = remember(loader) { unlit(Color(0x55E53935)) }
             val matPath = remember(loader) { unlit(Color(0xFF18FFFF)) }
             val matRouter = remember(loader) { unlit(Color(0xFFFFAB40)) }
             val matSpeed = remember(loader) { unlit(Color(0xFF00E5FF)) }
@@ -593,13 +610,11 @@ fun LiveMappingScreen(
                 if (showRaw) {
                     pathSamples.forEach { sample ->
                         key("b-${sample.id}") {
+                            // Match legend: strong ≥−60, fair ≥−75, weak ≥−90
                             val (coreMat, glowMat) = when {
-                                sample.rssiDbm >= UserPreferences.rssiStrongDbm ->
-                                    matStrong to matStrongGlow
-                                sample.rssiDbm >= UserPreferences.rssiMediumDbm ->
-                                    matMedium to matMediumGlow
-                                sample.rssiDbm >= UserPreferences.rssiDeadDbm ->
-                                    matWeak to matWeakGlow
+                                sample.rssiDbm >= -60 -> matStrong to matStrongGlow
+                                sample.rssiDbm >= -75 -> matMedium to matMediumGlow
+                                sample.rssiDbm >= -90 -> matWeak to matWeakGlow
                                 else -> matDead to matDeadGlow
                             }
                             val x = sample.poseX.safeCoord()
@@ -614,6 +629,14 @@ fun LiveMappingScreen(
                             val scale = Scale(s)
                             val pos = Position(x = x, y = y, z = z)
                             val r = AppConfig.SAMPLE_SPHERE_RADIUS_M
+                            // Soft floor ring under the ball (mock style)
+                            CylinderNode(
+                                radius = r * 1.15f,
+                                height = 0.01f,
+                                position = Position(x = x, y = pathFloorY, z = z),
+                                scale = scale,
+                                materialInstance = glowMat,
+                            )
                             if (AppConfig.AR_ENABLE_BALL_GLOW) {
                                 SphereNode(
                                     radius = r * AppConfig.SAMPLE_GLOW_SCALE,
@@ -674,90 +697,59 @@ fun LiveMappingScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .statusBarsPadding()
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .padding(horizontal = 12.dp, vertical = 8.dp)
                 .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            MappingStatusCard(
-                sampleCount = samples.size,
-                sessionLabel = activeSession?.locationName,
-                isFusing = isFusing,
-                trackingLabel = tracking.stateLabel,
-                trackingOk = tracking.quality == TrackingQuality.TRACKING,
-                cooldownSeconds = cooldown,
-                fusionError = fusionError,
-                heatmapInfo = when {
-                    heatmapPlane != null && lastComputeMs != null ->
-                        stringResource(
-                            R.string.heatmap_compute_info,
-                            heatmapPlane!!.sampleCount,
-                            lastComputeMs!!,
-                        )
-                    samples.size in 1 until IdwInterpolator.MIN_SAMPLES_FOR_HEATMAP ->
-                        stringResource(
-                            R.string.heatmap_need_samples,
-                            IdwInterpolator.MIN_SAMPLES_FOR_HEATMAP,
-                        )
-                    else -> null
-                },
-                deadZoneCount = deadZones.size,
-                bestNetwork = bestNetwork,
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            // Always-visible guide: what balls / colors / path / speed mean
-            SignalGuideCard(
-                groundReady = groundReady,
-                isSessionActive = activeSession != null,
-                lastSpeed = lastSpeedBanner,
-            )
-            Spacer(modifier = Modifier.height(6.dp))
-            ViewModeRow(
-                mode = viewMode,
-                onModeChange = { viewMode = it },
-            )
-
-            if (deadZones.isNotEmpty() && showHeatmap) {
-                Spacer(modifier = Modifier.height(6.dp))
-                DeadZoneChipRow(
-                    zones = deadZones,
-                    onZoneClick = { selectedDeadZone = it },
+            AnalyzerTopBar(live = isFusing || activeSession != null)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ConnectedNetworkCard(
+                    ssid = connectedNet.ssid,
+                    connected = connectedNet.connected,
+                    detail = connectedNet.ipAddress,
+                    modifier = Modifier.weight(1.15f),
                 )
+                SignalLegendCard(modifier = Modifier.weight(1f))
             }
-            speedTestError?.let { err ->
-                Spacer(modifier = Modifier.height(4.dp))
+            // Compact session strip
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xCC12151C))
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
                 Text(
-                    text = err,
-                    color = Color(0xFFFF8A80),
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xCC000000), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                )
-            }
-            cloudStatus?.let { msg ->
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = msg,
-                    color = NeonCyan,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0x99000000), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 5.dp),
-                )
-            }
-            lastSpeedBanner?.let { msg ->
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = msg,
-                    color = NeonMint,
+                    text = when {
+                        activeSession != null ->
+                            "${activeSession!!.locationName} · ${samples.size} pts"
+                        else -> tracking.stateLabel
+                    },
+                    color = Color.White.copy(alpha = 0.85f),
                     style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xCC004D40), RoundedCornerShape(8.dp))
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f),
                 )
+                StatusPill(
+                    label = if (tracking.quality == TrackingQuality.TRACKING) "AR OK" else "AR…",
+                    ok = tracking.quality == TrackingQuality.TRACKING,
+                )
+            }
+            ViewModeRow(mode = viewMode, onModeChange = { viewMode = it })
+            fusionError?.let {
+                Text(it, color = Color(0xFFFF8A80), style = MaterialTheme.typography.labelSmall)
+            }
+            speedTestError?.let {
+                Text(it, color = Color(0xFFFF8A80), style = MaterialTheme.typography.labelSmall)
+            }
+            cloudStatus?.let {
+                Text(it, color = NeonCyan, style = MaterialTheme.typography.labelSmall)
             }
         }
 
@@ -826,17 +818,29 @@ fun LiveMappingScreen(
                 .navigationBarsPadding()
                 .padding(horizontal = 12.dp, vertical = 8.dp)
                 .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
+            ScanHintCard(
+                title = when {
+                    !groundReady -> "Point your camera to start"
+                    activeSession == null -> "Start a session to map coverage"
+                    else -> "Move around to scan your Wi‑Fi strength"
+                },
+                body = when {
+                    !groundReady -> "Slowly move the phone until AR locks the floor."
+                    activeSession == null -> "Name the room, then walk corners slowly."
+                    else -> "Balls show RSSI (dBm). Green strong · yellow fair · purple weak."
+                },
+            )
+
             if (activeSession != null) {
-                CompactPrimaryButton(
-                    text = if (speedTestRunning) {
-                        stringResource(R.string.speed_test_running_short)
-                    } else {
-                        stringResource(R.string.speed_test_run_here)
-                    },
-                    onClick = {
-                        val session = activeSession ?: return@CompactPrimaryButton
+                SpeedTestPanel(
+                    downloadMbps = lastDownloadMbps,
+                    uploadMbps = lastUploadMbps,
+                    running = speedTestRunning,
+                    enabled = canRunSpeedTest,
+                    onRun = {
+                        val session = activeSession ?: return@SpeedTestPanel
                         val currentPose = pose
                         speedTestError = null
                         scope.launch {
@@ -849,57 +853,40 @@ fun LiveMappingScreen(
                                         poseZ = currentPose.z,
                                         result = outcome.result,
                                     )
-                                    speedTestError = null
+                                    lastDownloadMbps = outcome.result.downloadMbps
+                                    lastUploadMbps = outcome.result.uploadMbps
                                     lastSpeedBanner = SpeedFormat.formatDetailLine(
                                         outcome.result.downloadMbps,
                                         outcome.result.uploadMbps,
                                         outcome.result.pingMs,
                                     )
-                                    // Auto-clear banner after a few seconds.
-                                    launch {
-                                        delay(8_000)
-                                        if (lastSpeedBanner?.contains(
-                                                SpeedFormat.formatMbps(outcome.result.downloadMbps),
-                                            ) == true
-                                        ) {
-                                            lastSpeedBanner = null
-                                        }
-                                    }
+                                    speedTestError = null
                                 }
                                 is SpeedTestOutcome.Failure -> {
                                     speedTestError = speedTestErrorMessage(outcome.error)
-                                    lastSpeedBanner = null
                                 }
                             }
                         }
                     },
-                    enabled = canRunSpeedTest,
-                    modifier = Modifier.fillMaxWidth(),
-                    containerColor = Color(0xFF00838F),
                 )
-                if (!trackingStable && !speedTestRunning) {
-                    Text(
-                        text = stringResource(R.string.speed_test_needs_tracking),
-                        color = Color(0xFFFFF176),
-                        style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 2.dp),
-                    )
-                }
             }
 
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (activeSession == null) {
                     CompactPrimaryButton(
                         text = stringResource(R.string.session_start),
                         onClick = {
-                            locationName = ""
+                            locationName = connectedNet.ssid.takeIf {
+                                it.isNotBlank() && it != "Unknown network"
+                            } ?: "Room"
                             showStartDialog = true
                         },
                         modifier = Modifier.weight(1f),
+                        containerColor = Color(0xFF1B5E20),
+                        contentColor = Color(0xFF69F0AE),
                     )
                 } else {
                     CompactPrimaryButton(
@@ -908,16 +895,18 @@ fun LiveMappingScreen(
                             scope.launch {
                                 val sess = arSession
                                 val active = activeSession
-                                if (sess != null && active != null && cloudAnchors.isApiKeyConfigured()) {
+                                if (sess != null && active != null &&
+                                    cloudAnchors.isApiKeyConfigured()
+                                ) {
                                     cloudStatus = context.getString(R.string.cloud_hosting)
                                     val hostResult = withTimeoutOrNull(
                                         AppConfig.CLOUD_ANCHOR_TIMEOUT_SEC * 1_000,
                                     ) {
-                                        // Prefer pose from our frame pipeline (avoids fighting SceneView update).
                                         val p = pose
-                                        val arPose = com.google.ar.core.Pose.makeTranslation(p.x, p.y, p.z)
+                                        val arPose = com.google.ar.core.Pose.makeTranslation(
+                                            p.x, p.y, p.z,
+                                        )
                                         val local = cloudAnchors.createLocalAnchor(sess, arPose)
-                                            ?: cloudAnchors.createLocalAnchorAtCamera(sess)
                                         if (local == null) {
                                             CloudAnchorManager.HostResult.Failure("no tracking")
                                         } else {
@@ -942,17 +931,16 @@ fun LiveMappingScreen(
                                                 hostResult.reason,
                                             )
                                         }
-                                        null -> {
-                                            cloudStatus = context.getString(
-                                                R.string.cloud_host_fail,
-                                                "timeout",
-                                            )
-                                        }
+                                        null -> cloudStatus = context.getString(
+                                            R.string.cloud_host_fail,
+                                            "timeout",
+                                        )
                                     }
                                 }
                                 fusionEngine.stop()
-                                val closed = sessionManager.endSession()
-                                closed?.let { syncManager.enqueueSessionSync(it.sessionId) }
+                                sessionManager.endSession()?.let {
+                                    syncManager.enqueueSessionSync(it.sessionId)
+                                }
                             }
                         },
                         modifier = Modifier.weight(1f),
@@ -968,11 +956,8 @@ fun LiveMappingScreen(
                         shape = RoundedCornerShape(12.dp),
                     ) {
                         Text(
-                            if (isScanning) {
-                                stringResource(R.string.scanning)
-                            } else {
-                                stringResource(R.string.scan_now)
-                            },
+                            if (isScanning) stringResource(R.string.scanning)
+                            else stringResource(R.string.scan_now),
                             style = MaterialTheme.typography.labelLarge,
                         )
                     }
@@ -1528,16 +1513,13 @@ private fun ResumeMappingDialog(
     )
 }
 
-/** Green → yellow → orange → red (weak is red). */
+/** Green strong · yellow fair · purple weak · red dead (analyzer mock). */
 private fun rssiTierColor(rssiDbm: Int): Color {
-    val strong = UserPreferences.rssiStrongDbm
-    val medium = UserPreferences.rssiMediumDbm
-    val dead = UserPreferences.rssiDeadDbm
     return when {
-        rssiDbm >= strong -> Color(0xFF00C853)
-        rssiDbm >= medium -> Color(0xFFFFD600)
-        rssiDbm >= dead -> Color(0xFFFF6D00)
-        else -> Color(0xFFE51C23)
+        rssiDbm >= -60 -> Color(0xFF4CAF50)
+        rssiDbm >= -75 -> Color(0xFFFFEB3B)
+        rssiDbm >= -90 -> Color(0xFFAB47BC)
+        else -> Color(0xFFE53935)
     }
 }
 
