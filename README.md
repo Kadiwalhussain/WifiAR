@@ -22,7 +22,7 @@
 
 WifiAR turns an Android phone into a **spatial Wi‑Fi survey tool**. Walk a room once and the app fuses live RSSI with ARCore pose tracking to paint a heatmap over the real floor, flag dead zones, compare nearby networks, measure throughput, and recommend where a router might perform better.
 
-Built for people who care about coverage — homeowners, field techs, network students, and anyone tired of guessing why the bedroom has one bar.
+Built for people who care about coverage — homeowners, field techs, network students, and anyone tired of guessing why the bedroom has one bar and more.
 
 ---
 
